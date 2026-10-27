@@ -105,7 +105,10 @@ export interface MessageSummary {
     has_attachments: boolean;
     size: number;
     message_id?: string;
+    preview?: string;
 }
+
+export type MessageFilter = 'unseen' | 'flagged' | 'attachments';
 
 export interface Attachment {
     part: string;
@@ -125,6 +128,9 @@ export interface Message extends MessageSummary {
     html?: string;
     truncated?: boolean;
     attachments: Attachment[];
+
+    // e-mail → Mattermost user id, for photos of colleagues.
+    avatars?: Record<string, string>;
 }
 
 export interface MessagePage {
@@ -132,6 +138,7 @@ export interface MessagePage {
     total: number;
     unseen: number;
     has_more: boolean;
+    avatars?: Record<string, string>;
 }
 
 export interface MessageRef {
@@ -157,6 +164,7 @@ export interface SendRequest {
     bcc: Recipient[];
     subject: string;
     text: string;
+    html?: string;
     reply_to?: MessageRef;
     forward?: MessageRef;
     forward_parts?: string[];

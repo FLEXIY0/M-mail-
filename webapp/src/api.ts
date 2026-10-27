@@ -107,8 +107,8 @@ export const api = {
     updateInfo: (refresh: boolean) => request<UpdateInfo>('GET', `/admin/update${refresh ? '?refresh=1' : ''}`),
 
     folders: () => request<{folders: Folder[]}>('GET', '/folders'),
-    messages: (folder: string, offset: number, query = '') =>
-        request<MessagePage>('GET', `/messages${q({folder, offset, q: query || undefined})}`),
+    messages: (folder: string, offset: number, query = '', filter = '') =>
+        request<MessagePage>('GET', `/messages${q({folder, offset, q: query || undefined, filter: filter || undefined})}`),
     message: (folder: string, uid: number, peek = false) =>
         request<Message>('GET', `/message${q({folder, uid, peek: peek ? 1 : undefined})}`),
     setFlag: (folder: string, uids: number[], flag: 'seen' | 'flagged', value: boolean) =>

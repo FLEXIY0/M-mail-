@@ -2,12 +2,12 @@ import React from 'react';
 
 import {ShareIcon, Spinner} from './icons';
 import {ErrorCard} from './shared';
-import {Button, Callout, Modal} from './ui';
+import {Button, Callout, PanelPage} from './ui';
 
 import type {ApiError} from '../api';
 import {api} from '../api';
-import {closeShare, getReduxState, useStore} from '../state';
-import type {Message} from '../types';
+import {closeShare, getReduxState} from '../state';
+import type {Message, MessageRef} from '../types';
 
 function currentChannel(): {id: string; name: string} | null {
     const state = getReduxState();
@@ -25,8 +25,7 @@ function currentChannel(): {id: string; name: string} | null {
 
 // ShareDialog posts an e-mail into the current channel, e.g. to discuss a
 // customer's letter with the team.
-export default function ShareDialog() {
-    const ref = useStore((s) => s.share);
+export default function ShareDialog({msgRef: ref}: {msgRef: MessageRef}) {
     const [msg, setMsg] = React.useState<Message | null>(null);
     const [comment, setComment] = React.useState('');
     const [withFile, setWithFile] = React.useState(true);
@@ -43,10 +42,6 @@ export default function ShareDialog() {
             api.message(ref.folder, ref.uid, true).then(setMsg).catch((e: ApiError) => setError(e));
         }
     }, [ref]);
-
-    if (!ref) {
-        return null;
-    }
 
     const share = async () => {
         if (!channel) {
@@ -65,7 +60,7 @@ export default function ShareDialog() {
     };
 
     return (
-        <Modal
+        <PanelPage
             title='Отправить письмо в канал'
             onClose={closeShare}
             width={560}
@@ -136,6 +131,6 @@ export default function ShareDialog() {
                     compact={true}
                 />
             )}
-        </Modal>
+        </PanelPage>
     );
 }

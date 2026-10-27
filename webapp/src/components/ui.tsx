@@ -1,6 +1,6 @@
 import React from 'react';
 
-import {CloseIcon, Spinner} from './icons';
+import {ArrowLeftIcon, CloseIcon, Spinner} from './icons';
 
 type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
     variant?: 'primary' | 'secondary' | 'tertiary' | 'danger' | 'ghost';
@@ -182,5 +182,50 @@ export function Linkify({text}: {text: string}) {
                 return <React.Fragment key={i}>{part}</React.Fragment>;
             })}
         </>
+    );
+}
+
+// PanelPage is a screen inside the right-hand panel: a header with "back",
+// a scrolling body and an optional sticky footer. It takes the same props
+// as Modal, so dialogs became panel screens without rewriting them.
+export function PanelPage({title, onClose, children, footer, closeLabel = 'Назад', icon = 'back', actions, className = ''}: {
+    title: React.ReactNode;
+    onClose: () => void;
+    children: React.ReactNode;
+    footer?: React.ReactNode;
+    width?: number;
+    closeLabel?: string;
+    icon?: 'back' | 'close';
+    actions?: React.ReactNode;
+    className?: string;
+}) {
+    return (
+        <div
+            className={`mml-page ${className}`}
+            role='region'
+            aria-label={typeof title === 'string' ? title : undefined}
+            onKeyDown={(e) => {
+                if (e.key === 'Escape' && !(e.target as HTMLElement).closest('.mml-picker__menu')) {
+                    e.stopPropagation();
+                    onClose();
+                }
+            }}
+        >
+            <div className='mml-page__header'>
+                <button
+                    type='button'
+                    className='mml-icon-btn mml-page__back'
+                    onClick={onClose}
+                    aria-label={closeLabel}
+                    title={closeLabel}
+                >
+                    {icon === 'close' ? <CloseIcon size={20}/> : <ArrowLeftIcon size={20}/>}
+                </button>
+                <div className='mml-page__title'>{title}</div>
+                {actions && <div className='mml-page__actions'>{actions}</div>}
+            </div>
+            <div className='mml-page__body'>{children}</div>
+            {footer && <div className='mml-page__footer'>{footer}</div>}
+        </div>
     );
 }

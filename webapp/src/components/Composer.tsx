@@ -1,13 +1,14 @@
 import React from 'react';
 
 import {CloseIcon, PaperclipIcon, SendIcon, Spinner} from './icons';
+import {HtmlFrame} from './MessageView';
 import RecipientPicker, {participantFromEmail} from './RecipientPicker';
 import type {Participant} from './RecipientPicker';
 import {ErrorCard} from './shared';
-import {Button, Callout, Modal} from './ui';
+import {Callout, PanelPage} from './ui';
 
 import {ApiError, api} from '../api';
-import {addressFull, formatSize, quoteText, subjectWith} from '../format';
+import {addressFull, formatQuoteDate, formatSize, quoteText, subjectWith} from '../format';
 import {closeCompose, mailChanged, useStore} from '../state';
 import type {ComposeRequest} from '../state';
 import type {Address, Attachment, Me, Message, OutgoingFile, Recipient, SendRequest} from '../types';
@@ -19,6 +20,32 @@ interface LocalFile {
     size: number;
     data?: string; // base64, filled when read
 }
+
+// Quote is the original message under a reply or a forward. It stays a
+// separate block, like in mail apps: it can be removed or turned into
+// editable text.
+interface Quote {
+    header: string;
+    text: string;
+    html?: string;
+}
+
+interface Draft {
+    to: Participant[];
+    cc: Participant[];
+    bcc: Participant[];
+    showCc: boolean;
+    subject: string;
+    text: string;
+    files: LocalFile[];
+    quote: Quote | null;
+    forwardParts: string[];
+    mmFiles: Array<{id: string; name: string; size: number}>;
+    initialText: string;
+}
+
+// Drafts survive closing the panel: the composer remounts with them.
+const drafts = new Map<string, Draft>();
 
 function toParticipants(list: Address[], exclude: Set<string>): Participant[] {
     const out: Participant[] = [];
@@ -48,82 +75,119 @@ function readAsBase64(file: File): Promise<string> {
     });
 }
 
-function withSignature(body: string, signature: string) {
-    const sig = signature.trim();
-    return sig ? `${body}\n\n-- \n${sig}` : body;
+function escapeHTML(s: string) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-// buildDraft prepares the fields of a reply or a forward from the original.
-function buildDraft(req: ComposeRequest, original: Message | null, me: Me) {
-    const ownAddresses = new Set([(me.email || '').toLowerCase(), (me.username || '').toLowerCase()]);
+export function textToHTML(text: string) {
+    return escapeHTML(text).replace(/\r?\n/g, '<br>');
+}
+
+// quoteHTMLOf turns a whole HTML document into a fragment that can be put
+// into a blockquote: the body with its own style, the styles of the head,
+// no scripts or document-level tags that would restyle the reply itself.
+export function quoteHTMLOf(html: string): string {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    doc.querySelectorAll('script, iframe, object, embed, form, meta, link, base, title').forEach((el) => el.remove());
+    doc.querySelectorAll('*').forEach((el) => {
+        for (const attr of Array.from(el.attributes)) {
+            if (attr.name.toLowerCase().startsWith('on')) {
+                el.removeAttribute(attr.name);
+            }
+        }
+    });
+    const styles = Array.from(doc.querySelectorAll('style')).map((el) => {
+        el.remove();
+        return el.outerHTML;
+    }).join('');
+    const bodyStyle = doc.body.getAttribute('style') || '';
+    const wrapper = doc.createElement('div');
+    if (bodyStyle) {
+        wrapper.setAttribute('style', bodyStyle);
+    }
+    wrapper.innerHTML = doc.body.innerHTML;
+    return styles + wrapper.outerHTML;
+}
+
+function withSignature(body: string, signature: string) {
+    const sig = signature.trim();
+    return sig ? `${body}\n\n${sig}` : body;
+}
+
+function quotedText(q: Quote, forward: boolean) {
+    return forward ? `${q.header}\n\n${q.text}` : `${q.header}\n${quoteText(q.text)}`;
+}
+
+// buildDraft prepares the fields of a new message, a reply or a forward.
+function buildDraft(req: ComposeRequest, original: Message | null, me: Me): Draft {
+    const own = new Set([(me.email || '').toLowerCase(), (me.username || '').toLowerCase()]);
     const signature = me.settings?.signature || '';
-    let to: Participant[] = [];
-    let cc: Participant[] = [];
-    let subject = req.subject || '';
-    let text = req.text || '';
+    const draft: Draft = {to: [], cc: [], bcc: [], showCc: false, subject: req.subject || '', text: '', files: [], quote: null, forwardParts: [], mmFiles: req.mattermostFiles || [], initialText: ''};
 
     if (req.to) {
-        to = req.to.filter((r) => r.email).map((r) => participantFromEmail(r.email || '', r.name));
+        draft.to = req.to.filter((r) => r.email).map((r) => participantFromEmail(r.email || '', r.name));
     }
     if (original && (req.mode === 'reply' || req.mode === 'reply_all')) {
         const replyTo = original.reply_to.length ? original.reply_to : original.from;
 
         // Replying to one's own message (e.g. from "Sent") goes to its recipients.
-        const own = replyTo.every((a) => ownAddresses.has(a.email.toLowerCase()));
-        to = toParticipants(own ? original.to : replyTo, req.mode === 'reply_all' ? ownAddresses : new Set());
+        const fromSelf = replyTo.every((a) => own.has(a.email.toLowerCase()));
+        draft.to = toParticipants(fromSelf ? original.to : replyTo, req.mode === 'reply_all' ? own : new Set());
         if (req.mode === 'reply_all') {
-            const taken = new Set([...ownAddresses, ...to.map((p) => p.email || '')]);
-            cc = toParticipants([...(own ? [] : original.to), ...original.cc], taken);
+            const taken = new Set([...own, ...draft.to.map((p) => p.email || '')]);
+            draft.cc = toParticipants([...(fromSelf ? [] : original.to), ...original.cc], taken);
+            draft.showCc = draft.cc.length > 0;
         }
-        subject = subjectWith('Re', original.subject);
+        draft.subject = subjectWith('Re', original.subject);
         const author = original.from[0] ? addressFull(original.from[0]) : '';
-        const when = new Date(original.date).toLocaleString('ru-RU', {day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit'});
-        text = withSignature('', signature) + `\n\n${when}, ${author} пишет:\n${quoteText(original.text || '')}`;
+        draft.quote = {header: `${formatQuoteDate(original.date)} от ${author}:`, text: original.text || '', html: original.html};
+        draft.text = withSignature('', signature);
     } else if (original && req.mode === 'forward') {
-        subject = subjectWith('Fwd', original.subject);
+        draft.subject = subjectWith('Fwd', original.subject);
         const head = [
-            '---------- Пересылаемое сообщение ----------',
+            '-------- Пересылаемое сообщение --------',
             `От: ${original.from.map(addressFull).join(', ')}`,
-            `Дата: ${new Date(original.date).toLocaleString('ru-RU')}`,
+            `Дата: ${formatQuoteDate(original.date)}`,
             `Тема: ${original.subject}`,
             `Кому: ${original.to.map(addressFull).join(', ')}`,
         ];
         if (original.cc.length) {
             head.push(`Копия: ${original.cc.map(addressFull).join(', ')}`);
         }
-        text = withSignature('', signature) + `\n\n${head.join('\n')}\n\n${original.text || ''}`;
+        draft.quote = {header: head.join('\n'), text: original.text || '', html: original.html};
+        draft.text = withSignature('', signature);
+        draft.forwardParts = (original.attachments || []).filter((a) => !a.inline).map((a) => a.part);
     } else {
-        text = withSignature(text, signature);
+        draft.text = withSignature(req.text || '', signature);
     }
-    return {to, cc, subject, text};
+    draft.initialText = draft.text;
+    return draft;
 }
 
-export default function ComposerRoot() {
-    const request = useStore((s) => s.compose);
+export default function ComposerRoot({request}: {request: ComposeRequest}) {
     const me = useStore((s) => s.me);
     const config = useStore((s) => s.config);
-    if (!request || !me || !config) {
-        return null;
+    if (!me || !config) {
+        return <div className='mml-center'><Spinner size={24}/></div>;
     }
     if (!me.connected) {
         return (
-            <Modal
+            <PanelPage
                 title='Новое письмо'
                 onClose={closeCompose}
-                width={480}
+                icon='close'
             >
                 <Callout
                     kind='info'
                     title='Почта не подключена'
                 >
-                    {'Подключите почту на правой панели (иконка почты), и можно будет отправлять письма прямо из Mattermost.'}
+                    {'Подключите почту, и можно будет отправлять письма прямо из Mattermost.'}
                 </Callout>
-            </Modal>
+            </PanelPage>
         );
     }
     return (
         <Composer
-            key={`${request.mode}:${request.source?.folder}:${request.source?.uid}`}
             request={request}
             me={me}
             maxBytes={config.max_attachment_bytes}
@@ -132,126 +196,164 @@ export default function ComposerRoot() {
 }
 
 function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; maxBytes: number}) {
+    const id = request.id || 'default';
     const needsOriginal = Boolean(request.source && request.mode !== 'new');
     const [original, setOriginal] = React.useState<Message | null>(null);
     const [loadError, setLoadError] = React.useState<ApiError | null>(null);
-    const [ready, setReady] = React.useState(!needsOriginal);
-
-    const [to, setTo] = React.useState<Participant[]>([]);
-    const [cc, setCc] = React.useState<Participant[]>([]);
-    const [bcc, setBcc] = React.useState<Participant[]>([]);
-    const [showCc, setShowCc] = React.useState(false);
-    const [subject, setSubject] = React.useState('');
-    const [text, setText] = React.useState('');
-    const [files, setFiles] = React.useState<LocalFile[]>([]);
-    const [forwardParts, setForwardParts] = React.useState<Set<string>>(new Set());
-    const [mmFiles, setMmFiles] = React.useState(request.mattermostFiles || []);
+    const [draft, setDraftState] = React.useState<Draft | null>(() => drafts.get(id) || (needsOriginal ? null : buildDraft(request, null, me)));
     const [sending, setSending] = React.useState(false);
     const [error, setError] = React.useState<ApiError | null>(null);
     const [dragOver, setDragOver] = React.useState(false);
     const fileInput = React.useRef<HTMLInputElement>(null);
     const textRef = React.useRef<HTMLTextAreaElement>(null);
-    const initial = React.useRef('');
 
-    const apply = (m: Message | null) => {
-        const draft = buildDraft(request, m, me);
-        setTo(draft.to);
-        setCc(draft.cc);
-        setShowCc(draft.cc.length > 0);
-        setSubject(draft.subject);
-        setText(draft.text);
-        initial.current = draft.text;
-        if (m && request.mode === 'forward') {
-            setForwardParts(new Set((m.attachments || []).filter((a) => !a.inline).map((a) => a.part)));
-        }
-        setReady(true);
+    const setDraft = (fn: (prev: Draft) => Draft) => {
+        setDraftState((prev) => {
+            if (!prev) {
+                return prev;
+            }
+            const next = fn(prev);
+            drafts.set(id, next);
+            return next;
+        });
     };
+    const update = (patch: Partial<Draft>) => setDraft((prev) => ({...prev, ...patch}));
 
     React.useEffect(() => {
         if (!needsOriginal || !request.source) {
-            apply(null);
             return;
         }
         api.message(request.source.folder, request.source.uid, true).
             then((m) => {
                 setOriginal(m);
-                apply(m);
+                if (!drafts.has(id)) {
+                    const d = buildDraft(request, m, me);
+                    drafts.set(id, d);
+                    setDraftState(d);
+                }
             }).
             catch((e: ApiError) => setLoadError(e));
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // Replies start above the quote, like in mail apps.
+    // Replies start above the quote and the signature, like in mail apps.
     React.useEffect(() => {
-        if (ready && request.mode !== 'new' && textRef.current) {
+        if (draft && request.mode !== 'new' && textRef.current) {
             textRef.current.focus();
             textRef.current.setSelectionRange(0, 0);
-            textRef.current.scrollTop = 0;
         }
-    }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [Boolean(draft)]); // eslint-disable-line react-hooks/exhaustive-deps
 
-    const forwarded: Attachment[] = original && request.mode === 'forward' ? (original.attachments || []).filter((a) => !a.inline) : [];
-    const totalBytes = files.reduce((n, f) => n + f.size, 0) +
-        forwarded.filter((a) => forwardParts.has(a.part)).reduce((n, a) => n + a.size, 0) +
-        mmFiles.reduce((n, f) => n + f.size, 0);
+    // The text area grows with the text; the panel scrolls.
+    React.useLayoutEffect(() => {
+        const el = textRef.current;
+        if (el) {
+            el.style.height = 'auto';
+            el.style.height = `${Math.max(el.scrollHeight, 160)}px`;
+        }
+    }, [draft?.text]);
+
+    if (!draft) {
+        return (
+            <PanelPage
+                title={request.mode === 'forward' ? 'Пересылка' : 'Ответ'}
+                onClose={closeCompose}
+                icon='close'
+            >
+                {loadError ? (
+                    <ErrorCard
+                        error={loadError}
+                        compact={true}
+                    />
+                ) : <div className='mml-center'><Spinner size={24}/></div>}
+            </PanelPage>
+        );
+    }
+
+    const forward = request.mode === 'forward';
+    const forwarded: Attachment[] = original && forward ? (original.attachments || []).filter((a) => !a.inline) : [];
+    const forwardSet = new Set(draft.forwardParts);
+    const totalBytes = draft.files.reduce((n, f) => n + f.size, 0) +
+        forwarded.filter((a) => forwardSet.has(a.part)).reduce((n, a) => n + a.size, 0) +
+        draft.mmFiles.reduce((n, f) => n + f.size, 0);
     const tooLarge = totalBytes > maxBytes;
-    const dirty = text !== initial.current || files.length > 0 || (request.mode === 'new' && (to.length > 0 || subject !== ''));
+    const dirty = draft.text !== draft.initialText || draft.files.length > 0 || (request.mode === 'new' && (draft.to.length > 0 || draft.subject !== (request.subject || '')));
+    const reading = draft.files.some((f) => !f.data);
 
     const close = () => {
         // eslint-disable-next-line no-alert
-        if (dirty && !sending && !window.confirm('Закрыть письмо? Текст не сохранится.')) {
+        if (dirty && !sending && !window.confirm('Удалить черновик? Текст письма не сохранится.')) {
             return;
         }
+        drafts.delete(id);
         closeCompose();
     };
 
     const addFiles = async (list: FileList | null) => {
-        if (!list) {
+        if (!list || !list.length) {
             return;
         }
-        const added: LocalFile[] = Array.from(list).map((f, i) => ({key: `${Date.now()}-${i}-${f.name}`, name: f.name, type: f.type, size: f.size}));
-        setFiles((prev) => [...prev, ...added]);
-        await Promise.all(Array.from(list).map(async (f, i) => {
+        const files = Array.from(list);
+        const added: LocalFile[] = files.map((f, i) => ({key: `${Date.now()}-${i}-${f.name}`, name: f.name, type: f.type, size: f.size}));
+        setDraft((prev) => ({...prev, files: [...prev.files, ...added]}));
+        await Promise.all(files.map(async (f, i) => {
             try {
                 const data = await readAsBase64(f);
-                setFiles((prev) => prev.map((p) => (p.key === added[i].key ? {...p, data} : p)));
+                setDraft((prev) => ({...prev, files: prev.files.map((p) => (p.key === added[i].key ? {...p, data} : p))}));
             } catch {
-                setFiles((prev) => prev.filter((p) => p.key !== added[i].key));
+                setDraft((prev) => ({...prev, files: prev.files.filter((p) => p.key !== added[i].key)}));
             }
         }));
     };
 
+    // The text goes as is, plus the quote: as "> " lines in the text
+    // version and with its formatting in the HTML version.
+    const buildBody = () => {
+        const q = draft.quote;
+        if (!q) {
+            return {text: draft.text, html: ''};
+        }
+        const own = draft.text.replace(/\s+$/, '');
+        const text = `${own}\n\n${quotedText(q, forward)}`;
+        const quoteHTML = q.html ? quoteHTMLOf(q.html) : textToHTML(q.text);
+        const html = `<div>${textToHTML(own)}</div><br>` +
+            `<div>${textToHTML(q.header)}</div>` +
+            (forward ? `<div>${quoteHTML}</div>` : `<blockquote style="margin:0 0 0 .8ex;border-left:2px solid #0077ff;padding-left:1ex">${quoteHTML}</blockquote>`);
+        return {text, html};
+    };
+
     const send = async () => {
-        if (to.length + cc.length + bcc.length === 0) {
+        if (draft.to.length + draft.cc.length + draft.bcc.length === 0) {
             setError(new ApiError('invalid_message', 'Укажите хотя бы одного получателя.', 'Укажите хотя бы одного получателя.', 400));
             return;
         }
-        if (!subject.trim()) {
-            // eslint-disable-next-line no-alert
-            if (!window.confirm('Отправить письмо без темы?')) {
-                return;
-            }
+        // eslint-disable-next-line no-alert
+        if (!draft.subject.trim() && !window.confirm('Отправить письмо без темы?')) {
+            return;
         }
         setSending(true);
         setError(null);
-        const attachments: OutgoingFile[] = files.filter((f) => f.data).map((f) => ({filename: f.name, content_type: f.type || 'application/octet-stream', data: f.data || ''}));
+        const attachments: OutgoingFile[] = draft.files.filter((f) => f.data).map((f) => ({filename: f.name, content_type: f.type || 'application/octet-stream', data: f.data || ''}));
+        const body = buildBody();
         const req: SendRequest = {
-            to: toRecipients(to),
-            cc: toRecipients(cc),
-            bcc: toRecipients(bcc),
-            subject: subject.trim(),
-            text,
+            to: toRecipients(draft.to),
+            cc: toRecipients(draft.cc),
+            bcc: toRecipients(draft.bcc),
+            subject: draft.subject.trim(),
+            text: body.text,
+            html: body.html || undefined,
             attachments,
-            mattermost_files: mmFiles.map((f) => f.id),
+            mattermost_files: draft.mmFiles.map((f) => f.id),
         };
         if (request.source && (request.mode === 'reply' || request.mode === 'reply_all')) {
             req.reply_to = request.source;
         }
-        if (request.source && request.mode === 'forward') {
+        if (request.source && forward) {
             req.forward = request.source;
-            req.forward_parts = Array.from(forwardParts);
+            req.forward_parts = draft.forwardParts;
         }
         try {
             await api.send(req);
+            drafts.delete(id);
             closeCompose();
             mailChanged();
         } catch (e) {
@@ -260,157 +362,146 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
         }
     };
 
-    const titles: Record<ComposeRequest['mode'], string> = {
-        new: 'Новое письмо',
-        reply: 'Ответ',
-        reply_all: 'Ответ всем',
-        forward: 'Пересылка',
-    };
-
-    const reading = files.some((f) => !f.data);
-    return (
-        <Modal
-            title={titles[request.mode]}
-            onClose={close}
-            width={720}
-            footer={(
-                <div className='mml-wizard__footer'>
-                    <div className='mml-wizard__help'>
-                        <span className='mml-muted mml-small'>{`От: ${me.display_name ? `${me.display_name} <${me.email}>` : me.email}`}</span>
-                    </div>
-                    <div className='mml-wizard__buttons'>
-                        <Button
-                            variant='tertiary'
-                            onClick={close}
-                        >
-                            {'Отмена'}
-                        </Button>
-                        <Button
-                            variant='primary'
-                            loading={sending}
-                            disabled={!ready || reading || tooLarge}
-                            onClick={send}
-                            title='Ctrl+Enter'
-                        >
-                            <SendIcon size={14}/>
-                            {'Отправить'}
-                        </Button>
-                    </div>
-                </div>
-            )}
+    const sendButton = (
+        <button
+            type='button'
+            className='mml-icon-btn mml-icon-btn--lg mml-icon-btn--accent-plain mml-composer__send'
+            title='Отправить (Ctrl+Enter)'
+            aria-label='Отправить'
+            disabled={sending || reading || tooLarge}
+            onClick={send}
         >
-            {!ready && !loadError && <div className='mml-center'><Spinner size={24}/></div>}
-            {loadError && (
-                <ErrorCard
-                    error={loadError}
-                    compact={true}
-                />
-            )}
-            {ready && (
-                <div
-                    className={`mml-composer ${dragOver ? 'mml-composer--drag' : ''}`}
-                    onDragOver={(e) => {
-                        if (e.dataTransfer.types.includes('Files')) {
-                            e.preventDefault();
-                            setDragOver(true);
-                        }
-                    }}
-                    onDragLeave={() => setDragOver(false)}
-                    onDrop={(e) => {
-                        if (e.dataTransfer.files.length) {
-                            e.preventDefault();
-                            setDragOver(false);
-                            addFiles(e.dataTransfer.files);
-                        }
-                    }}
-                    onKeyDown={(e) => {
-                        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-                            e.preventDefault();
-                            send();
-                        }
-                    }}
-                >
-                    <div className='mml-composer__row'>
-                        <span className='mml-composer__label'>{'Кому'}</span>
-                        <RecipientPicker
-                            value={to}
-                            onChange={setTo}
-                            disabled={sending}
-                            autoFocus={request.mode === 'new' || request.mode === 'forward'}
-                        />
-                        {!showCc && (
-                            <button
-                                type='button'
-                                className='mml-link mml-small'
-                                onClick={() => setShowCc(true)}
-                            >
-                                {'Копия'}
-                            </button>
-                        )}
-                    </div>
-                    {showCc && (
-                        <>
-                            <div className='mml-composer__row'>
-                                <span className='mml-composer__label'>{'Копия'}</span>
-                                <RecipientPicker
-                                    value={cc}
-                                    onChange={setCc}
-                                    disabled={sending}
-                                    placeholder=''
-                                />
-                            </div>
-                            <div className='mml-composer__row'>
-                                <span
-                                    className='mml-composer__label'
-                                    title='Получатели скрытой копии не видны остальным'
-                                >
-                                    {'Скрытая'}
-                                </span>
-                                <RecipientPicker
-                                    value={bcc}
-                                    onChange={setBcc}
-                                    disabled={sending}
-                                    placeholder=''
-                                />
-                            </div>
-                        </>
-                    )}
-                    <div className='mml-composer__row'>
-                        <span className='mml-composer__label'>{'Тема'}</span>
-                        <input
-                            className='mml-input mml-composer__subject'
-                            value={subject}
-                            maxLength={500}
-                            disabled={sending}
-                            onChange={(e) => setSubject(e.target.value)}
-                        />
-                    </div>
-                    <textarea
-                        ref={textRef}
-                        className='mml-input mml-textarea mml-composer__text'
-                        value={text}
-                        disabled={sending}
-                        placeholder='Текст письма'
-                        onChange={(e) => setText(e.target.value)}
-                    />
+            {sending ? <Spinner size={18}/> : <SendIcon size={22}/>}
+        </button>
+    );
 
+    return (
+        <PanelPage
+            title={<span className='mml-ellipsis'>{me.email}</span>}
+            onClose={close}
+            closeLabel='Закрыть письмо'
+            icon='close'
+            actions={sendButton}
+            className='mml-page--composer'
+        >
+            <div
+                className={`mml-composer ${dragOver ? 'mml-composer--drag' : ''}`}
+                onDragOver={(e) => {
+                    if (e.dataTransfer.types.includes('Files')) {
+                        e.preventDefault();
+                        setDragOver(true);
+                    }
+                }}
+                onDragLeave={() => setDragOver(false)}
+                onDrop={(e) => {
+                    if (e.dataTransfer.files.length) {
+                        e.preventDefault();
+                        setDragOver(false);
+                        addFiles(e.dataTransfer.files);
+                    }
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                        e.preventDefault();
+                        send();
+                    }
+                }}
+            >
+                <div className='mml-composer__row'>
+                    <span className='mml-composer__label'>{'Кому:'}</span>
+                    <RecipientPicker
+                        value={draft.to}
+                        onChange={(to) => update({to})}
+                        disabled={sending}
+                        autoFocus={request.mode === 'new' || forward}
+                        placeholder=''
+                    />
+                </div>
+                {draft.showCc ? (
+                    <>
+                        <div className='mml-composer__row'>
+                            <span className='mml-composer__label'>{'Копия:'}</span>
+                            <RecipientPicker
+                                value={draft.cc}
+                                onChange={(cc) => update({cc})}
+                                disabled={sending}
+                                placeholder=''
+                            />
+                        </div>
+                        <div className='mml-composer__row'>
+                            <span
+                                className='mml-composer__label'
+                                title='Получатели скрытой копии не видны остальным'
+                            >
+                                {'Скр. копия:'}
+                            </span>
+                            <RecipientPicker
+                                value={draft.bcc}
+                                onChange={(bcc) => update({bcc})}
+                                disabled={sending}
+                                placeholder=''
+                            />
+                        </div>
+                    </>
+                ) : (
+                    <button
+                        type='button'
+                        className='mml-composer__row mml-composer__row--button'
+                        onClick={() => update({showCc: true})}
+                    >
+                        <span className='mml-composer__label'>{'Копия/Скр. копия:'}</span>
+                    </button>
+                )}
+                <div className='mml-composer__row'>
+                    <span className='mml-composer__label'>{'Тема:'}</span>
+                    <input
+                        className='mml-composer__subject'
+                        value={draft.subject}
+                        maxLength={500}
+                        disabled={sending}
+                        aria-label='Тема'
+                        onChange={(e) => update({subject: e.target.value})}
+                    />
+                    <button
+                        type='button'
+                        className='mml-icon-btn mml-icon-btn--accent-plain'
+                        title='Прикрепить файл'
+                        aria-label='Прикрепить файл'
+                        disabled={sending}
+                        onClick={() => fileInput.current?.click()}
+                    >
+                        <PaperclipIcon size={20}/>
+                    </button>
+                    <input
+                        ref={fileInput}
+                        type='file'
+                        multiple={true}
+                        style={{display: 'none'}}
+                        onChange={(e) => {
+                            addFiles(e.target.files);
+                            e.target.value = '';
+                        }}
+                    />
+                </div>
+
+                {(forwarded.length > 0 || draft.mmFiles.length > 0 || draft.files.length > 0) && (
                     <div className='mml-composer__files'>
                         {forwarded.map((a) => (
                             <label
                                 key={a.part}
-                                className={`mml-file ${forwardParts.has(a.part) ? '' : 'mml-file--off'}`}
+                                className={`mml-file ${forwardSet.has(a.part) ? '' : 'mml-file--off'}`}
                             >
                                 <input
                                     type='checkbox'
-                                    checked={forwardParts.has(a.part)}
+                                    checked={forwardSet.has(a.part)}
                                     onChange={() => {
-                                        const next = new Set(forwardParts);
+                                        const next = new Set(forwardSet);
                                         if (next.has(a.part)) {
                                             next.delete(a.part);
                                         } else {
                                             next.add(a.part);
                                         }
-                                        setForwardParts(next);
+                                        update({forwardParts: Array.from(next)});
                                     }}
                                 />
                                 <PaperclipIcon size={13}/>
@@ -418,7 +509,7 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                                 <span className='mml-muted mml-small'>{formatSize(a.size)}</span>
                             </label>
                         ))}
-                        {mmFiles.map((f) => (
+                        {draft.mmFiles.map((f) => (
                             <span
                                 key={f.id}
                                 className='mml-file'
@@ -430,13 +521,13 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                                     type='button'
                                     className='mml-icon-btn'
                                     aria-label={`Убрать ${f.name}`}
-                                    onClick={() => setMmFiles(mmFiles.filter((x) => x.id !== f.id))}
+                                    onClick={() => update({mmFiles: draft.mmFiles.filter((x) => x.id !== f.id)})}
                                 >
                                     <CloseIcon size={12}/>
                                 </button>
                             </span>
                         ))}
-                        {files.map((f) => (
+                        {draft.files.map((f) => (
                             <span
                                 key={f.key}
                                 className='mml-file'
@@ -448,41 +539,70 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                                     type='button'
                                     className='mml-icon-btn'
                                     aria-label={`Убрать ${f.name}`}
-                                    onClick={() => setFiles(files.filter((x) => x.key !== f.key))}
+                                    onClick={() => update({files: draft.files.filter((x) => x.key !== f.key)})}
                                 >
                                     <CloseIcon size={12}/>
                                 </button>
                             </span>
                         ))}
-                        <button
-                            type='button'
-                            className='mml-link mml-small'
-                            onClick={() => fileInput.current?.click()}
-                            disabled={sending}
-                        >
-                            <PaperclipIcon size={13}/>
-                            {'Прикрепить файл'}
-                        </button>
-                        <input
-                            ref={fileInput}
-                            type='file'
-                            multiple={true}
-                            style={{display: 'none'}}
-                            onChange={(e) => {
-                                addFiles(e.target.files);
-                                e.target.value = '';
-                            }}
-                        />
                     </div>
-                    {tooLarge && <div className='mml-hint mml-hint--warn'>{`Вложения больше ${formatSize(maxBytes)} — почтовый сервер такое письмо не примет.`}</div>}
-                    {error && (
+                )}
+                {tooLarge && <div className='mml-hint mml-hint--warn mml-composer__pad'>{`Вложения больше ${formatSize(maxBytes)} — почтовый сервер такое письмо не примет.`}</div>}
+
+                <textarea
+                    ref={textRef}
+                    className='mml-composer__text'
+                    value={draft.text}
+                    disabled={sending}
+                    placeholder='Текст письма'
+                    aria-label='Текст письма'
+                    onChange={(e) => update({text: e.target.value})}
+                />
+
+                {draft.quote && (
+                    <div className='mml-quote'>
+                        <div className='mml-quote__actions'>
+                            <button
+                                type='button'
+                                className='mml-link'
+                                onClick={() => {
+                                    const q = draft.quote;
+                                    if (q) {
+                                        update({text: `${draft.text.replace(/\s+$/, '')}\n\n${quotedText(q, forward)}`, quote: null});
+                                    }
+                                }}
+                            >
+                                {'Редактировать'}
+                            </button>
+                            <button
+                                type='button'
+                                className='mml-link'
+                                onClick={() => update({quote: null})}
+                            >
+                                {'Удалить'}
+                            </button>
+                        </div>
+                        <div className='mml-quote__header'>{draft.quote.header}</div>
+                        <div className={forward ? 'mml-quote__body mml-quote__body--forward' : 'mml-quote__body'}>
+                            {draft.quote.html ? (
+                                <HtmlFrame
+                                    html={draft.quote.html}
+                                    allowRemote={Boolean(me.settings?.load_images)}
+                                />
+                            ) : <div className='mml-reader__text'>{draft.quote.text}</div>}
+                        </div>
+                    </div>
+                )}
+
+                {error && (
+                    <div className='mml-composer__pad'>
                         <ErrorCard
                             error={error}
                             compact={true}
                         />
-                    )}
-                </div>
-            )}
-        </Modal>
+                    </div>
+                )}
+            </div>
+        </PanelPage>
     );
 }

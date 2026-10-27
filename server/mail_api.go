@@ -25,6 +25,7 @@ const (
 	maxRecipients   = 100
 	maxSubjectRunes = 500
 	maxTextBytes    = 1 << 20
+	maxHTMLBytes    = 6 << 20
 	maxShareText    = 3000
 	maxForwardRaw   = 25 << 20
 	sentCopyDelay   = 3 * time.Second
@@ -117,17 +118,24 @@ func folderParam(r *http.Request) string {
 	return folder
 }
 
-// GET /messages?folder=…&offset=…&limit=…&q=…
+// GET /messages?folder=…&offset=…&limit=…&q=…&filter=unseen|flagged|attachments
 func (p *Plugin) handleMessages(w http.ResponseWriter, r *http.Request) {
 	folder := folderParam(r)
 	offset := queryInt(r, "offset", 0, 0, 1<<30)
 	limit := queryInt(r, "limit", defaultPageSize, 1, maxPageSize)
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	filter := r.URL.Query().Get("filter")
+	switch filter {
+	case "", mailclient.FilterUnseen, mailclient.FilterFlagged, mailclient.FilterAttachments:
+	default:
+		writeError(w, http.StatusBadRequest, codeBadRequest, "unknown filter")
+		return
+	}
 	var page *mailclient.Page
 	if !p.mailRequest(w, r, func(ctx context.Context, _ *store.Account, conn *mailclient.IMAP) error {
 		var err error
-		if query != "" {
-			page, err = conn.Search(ctx, folder, query, limit)
+		if query != "" || filter != "" {
+			page, err = conn.Search(ctx, folder, query, filter, offset, limit)
 		} else {
 			page, err = conn.List(ctx, folder, offset, limit)
 		}
@@ -135,7 +143,18 @@ func (p *Plugin) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	writeJSON(w, http.StatusOK, page)
+	var emails []string
+	for _, m := range page.Messages {
+		for _, list := range [][]mailclient.Address{m.From, m.To} {
+			for _, a := range list {
+				emails = append(emails, a.Email)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, struct {
+		*mailclient.Page
+		Avatars map[string]string `json:"avatars"`
+	}{page, p.directory.lookup(p, emails)})
 }
 
 func uidParam(r *http.Request) (uint32, bool) {
@@ -160,7 +179,16 @@ func (p *Plugin) handleMessage(w http.ResponseWriter, r *http.Request) {
 	}) {
 		return
 	}
-	writeJSON(w, http.StatusOK, msg)
+	var emails []string
+	for _, list := range [][]mailclient.Address{msg.From, msg.To, msg.Cc} {
+		for _, a := range list {
+			emails = append(emails, a.Email)
+		}
+	}
+	writeJSON(w, http.StatusOK, struct {
+		*mailclient.Message
+		Avatars map[string]string `json:"avatars"`
+	}{msg, p.directory.lookup(p, emails)})
 }
 
 // inlineTypes may be shown in the browser; everything else is downloaded.
@@ -321,6 +349,7 @@ type sendRequest struct {
 	Bcc         []recipient       `json:"bcc"`
 	Subject     string            `json:"subject"`
 	Text        string            `json:"text"`
+	HTML        string            `json:"html"`
 	ReplyTo     *messageRef       `json:"reply_to,omitempty"`
 	Forward     *messageRef       `json:"forward,omitempty"`
 	Attachments []attachmentInput `json:"attachments"`
@@ -363,7 +392,7 @@ func (p *Plugin) cleanAddresses(list []recipient) ([]mailclient.Address, error) 
 func (p *Plugin) handleSend(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
 	cfg := p.getConfiguration()
-	limit := cfg.maxAttachmentBytes()*4/3 + maxTextBytes + maxBodyBytes
+	limit := cfg.maxAttachmentBytes()*4/3 + maxTextBytes + maxHTMLBytes + maxBodyBytes
 	var req sendRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, limit)).Decode(&req); err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, codeAttachmentsLarge, err.Error())
@@ -473,6 +502,7 @@ func (p *Plugin) buildOutgoing(account *store.Account, req *sendRequest) (*mailc
 		Bcc:     bcc,
 		Subject: strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(req.Subject)),
 		Text:    req.Text,
+		HTML:    req.HTML,
 	}
 	if n := len(out.Recipients()); n == 0 {
 		return nil, fmt.Errorf("укажите хотя бы одного получателя")
@@ -482,7 +512,7 @@ func (p *Plugin) buildOutgoing(account *store.Account, req *sendRequest) (*mailc
 	if utf8.RuneCountInString(out.Subject) > maxSubjectRunes {
 		return nil, fmt.Errorf("слишком длинная тема")
 	}
-	if len(out.Text) > maxTextBytes {
+	if len(out.Text) > maxTextBytes || len(out.HTML) > maxHTMLBytes {
 		return nil, fmt.Errorf("слишком длинный текст письма")
 	}
 	for _, a := range req.Attachments {

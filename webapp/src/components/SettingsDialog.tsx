@@ -4,7 +4,7 @@ import {IconSettings, choiceFrom, saveIconChoice} from './IconSettings';
 import type {IconChoice} from './IconSettings';
 import {MailSettings} from './MailSettings';
 import {ErrorCard} from './shared';
-import {Button, Callout, Modal} from './ui';
+import {Button, Callout, PanelPage} from './ui';
 
 import type {ApiError} from '../api';
 import {api} from '../api';
@@ -66,7 +66,7 @@ export default function SettingsDialog() {
     };
 
     return (
-        <Modal
+        <PanelPage
             title='Настройки почты'
             onClose={closeWizard}
             footer={(
@@ -186,6 +186,6 @@ export default function SettingsDialog() {
                     </button>
                 )}
             </section>
-        </Modal>
+        </PanelPage>
     );
 }

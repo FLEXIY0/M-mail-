@@ -26,12 +26,15 @@ type OutgoingAttachment struct {
 
 // Outgoing is a message to send.
 type Outgoing struct {
-	From        Address
-	To          []Address
-	Cc          []Address
-	Bcc         []Address
-	Subject     string
-	Text        string
+	From    Address
+	To      []Address
+	Cc      []Address
+	Bcc     []Address
+	Subject string
+	Text    string
+	// HTML is optional; when set the message carries both versions
+	// (multipart/alternative), e.g. to keep the formatting of a quote.
+	HTML        string
 	InReplyTo   string
 	References  []string
 	Attachments []OutgoingAttachment
@@ -99,9 +102,50 @@ func (o *Outgoing) Build() ([]byte, string, error) {
 
 	text := normalizeNewlines(o.Text)
 	var buf bytes.Buffer
-	if len(o.Attachments) == 0 {
+	plainHeader := func() mail.InlineHeader {
 		var ih mail.InlineHeader
 		ih.SetContentType("text/plain", map[string]string{"charset": "utf-8"})
+		ih.Set("Content-Transfer-Encoding", "quoted-printable")
+		return ih
+	}
+	htmlHeader := func() mail.InlineHeader {
+		var ih mail.InlineHeader
+		ih.SetContentType("text/html", map[string]string{"charset": "utf-8"})
+		ih.Set("Content-Transfer-Encoding", "quoted-printable")
+		return ih
+	}
+	writePart := func(create func(mail.InlineHeader) (io.WriteCloser, error), h mail.InlineHeader, body string) error {
+		pw, err := create(h)
+		if err != nil {
+			return err
+		}
+		if _, err = io.WriteString(pw, body); err != nil {
+			return err
+		}
+		return pw.Close()
+	}
+	// writeBody writes the text, and the HTML version next to it.
+	writeBody := func(iw *mail.InlineWriter) error {
+		if err := writePart(iw.CreatePart, plainHeader(), text); err != nil {
+			return err
+		}
+		if err := writePart(iw.CreatePart, htmlHeader(), normalizeNewlines(o.HTML)); err != nil {
+			return err
+		}
+		return iw.Close()
+	}
+
+	if len(o.Attachments) == 0 {
+		if o.HTML != "" {
+			iw, err := mail.CreateInlineWriter(&buf, h)
+			if err != nil {
+				return nil, "", err
+			}
+			if err = writeBody(iw); err != nil {
+				return nil, "", err
+			}
+			return buf.Bytes(), messageID, nil
+		}
 		h.SetContentType("text/plain", map[string]string{"charset": "utf-8"})
 		h.Set("Content-Transfer-Encoding", "quoted-printable")
 		w, err := mail.CreateSingleInlineWriter(&buf, h)
@@ -121,17 +165,15 @@ func (o *Outgoing) Build() ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	var ih mail.InlineHeader
-	ih.SetContentType("text/plain", map[string]string{"charset": "utf-8"})
-	ih.Set("Content-Transfer-Encoding", "quoted-printable")
-	tw, err := w.CreateSingleInline(ih)
-	if err != nil {
-		return nil, "", err
-	}
-	if _, err = io.WriteString(tw, text); err != nil {
-		return nil, "", err
-	}
-	if err = tw.Close(); err != nil {
+	if o.HTML != "" {
+		iw, inlineErr := w.CreateInline()
+		if inlineErr != nil {
+			return nil, "", inlineErr
+		}
+		if err = writeBody(iw); err != nil {
+			return nil, "", err
+		}
+	} else if err = writePart(w.CreateSingleInline, plainHeader(), text); err != nil {
 		return nil, "", err
 	}
 	for _, a := range o.Attachments {

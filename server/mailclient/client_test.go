@@ -232,6 +232,8 @@ func TestListGetAndDownload(t *testing.T) {
 	assert.Equal(t, "Планёрка", oldest.Subject, "windows-1251 subject is decoded")
 	assert.Equal(t, "Иван Петров", oldest.From[0].Name)
 	assert.False(t, oldest.HasAttachments)
+	assert.Equal(t, "Привет, коллеги!", oldest.Preview, "windows-1251 base64 preview")
+	assert.Equal(t, "Отчёт готов", newest.Preview, "quoted-printable plain part is preferred over HTML")
 
 	paged, err := conn.List(ctx, "INBOX", 1, 1)
 	require.NoError(t, err)
@@ -328,10 +330,27 @@ func TestSearchAndNewSince(t *testing.T) {
 	require.Len(t, fresh, 1)
 	assert.Equal(t, "Report", fresh[0].Subject)
 
-	found, err := conn.Search(ctx, "INBOX", "report", 10)
+	found, err := conn.Search(ctx, "INBOX", "report", "", 0, 10)
 	require.NoError(t, err)
 	require.Len(t, found.Messages, 1)
 	assert.Equal(t, "Report", found.Messages[0].Subject)
+	assert.Equal(t, "Отчёт готов", found.Messages[0].Preview)
+
+	unseen, err := conn.Search(ctx, "INBOX", "", FilterUnseen, 0, 10)
+	require.NoError(t, err)
+	assert.Equal(t, 2, unseen.Total)
+	paged, err := conn.Search(ctx, "INBOX", "", FilterUnseen, 1, 1)
+	require.NoError(t, err)
+	require.Len(t, paged.Messages, 1)
+	assert.Equal(t, "Планёрка", paged.Messages[0].Subject, "offset skips the newest")
+	assert.False(t, paged.HasMore)
+	withFiles, err := conn.Search(ctx, "INBOX", "", FilterAttachments, 0, 10)
+	require.NoError(t, err)
+	require.Len(t, withFiles.Messages, 1)
+	assert.Equal(t, "Report", withFiles.Messages[0].Subject)
+	flagged, err := conn.Search(ctx, "INBOX", "", FilterFlagged, 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, flagged.Messages)
 
 	has, err := conn.HasMessageID(ctx, "INBOX", "second@example.ru")
 	require.NoError(t, err)
@@ -474,9 +493,59 @@ func TestBuildAndSend(t *testing.T) {
 	assert.Equal(t, "xlsx-bytes", string(fileData))
 }
 
+func TestBuildWithHTML(t *testing.T) {
+	for _, files := range [][]OutgoingAttachment{nil, {{Filename: "a.txt", ContentType: "text/plain", Data: []byte("x")}}} {
+		out := &Outgoing{
+			From:        Address{Email: testUser},
+			To:          []Address{{Email: "anna@example.ru"}},
+			Subject:     "Re: Отчёт",
+			Text:        "Спасибо!\n\n> Отчёт",
+			HTML:        "<div>Спасибо!</div><blockquote><b>Отчёт</b></blockquote>",
+			Attachments: files,
+		}
+		raw, _, err := out.Build()
+		require.NoError(t, err)
+		reader, err := mail.CreateReader(bytes.NewReader(raw))
+		require.NoError(t, err)
+		var plain, html, file string
+		for {
+			part, err := reader.NextPart()
+			if err == io.EOF {
+				break
+			}
+			require.NoError(t, err)
+			b, _ := io.ReadAll(part.Body)
+			switch h := part.Header.(type) {
+			case *mail.InlineHeader:
+				ct, _, _ := h.ContentType()
+				if ct == "text/html" {
+					html = string(b)
+				} else {
+					plain = string(b)
+				}
+			case *mail.AttachmentHeader:
+				file = string(b)
+			}
+		}
+		assert.Equal(t, "Спасибо!\r\n\r\n> Отчёт", plain)
+		assert.Equal(t, "<div>Спасибо!</div><blockquote><b>Отчёт</b></blockquote>", html)
+		if files != nil {
+			assert.Equal(t, "x", file)
+		}
+	}
+}
+
 func TestHTMLToText(t *testing.T) {
 	html := `<html><head><style>p{color:red}</style></head><body><p>Привет&nbsp;мир</p><ul><li>один</li><li>два</li></ul><script>alert(1)</script>Конец<br>строки</body></html>`
 	assert.Equal(t, "Привет мир\n\n• один\n• два\nКонец\nстроки", HTMLToText(html))
+}
+
+func TestPreviewOf(t *testing.T) {
+	html := []byte(`<html><head><style>p{color:red}</style></head><body><p>Здравствуйте!</p><p>От лица администратора <a href="x">kis@soft</a> вам было</p><div class="cut`)
+	assert.Equal(t, "Здравствуйте! От лица администратора kis@soft вам было", previewOf(html, true))
+	assert.Equal(t, "", previewOf([]byte(`<html><head><style>body{margin:0}`), true), "cut inside styles")
+	assert.Equal(t, "Спасибо!", previewOf([]byte("Спасибо!\r\n\r\n> старое\r\n> письмо"), false))
+	assert.Equal(t, "Пр", previewOf([]byte("Пр\xd0"), false), "a character cut in half is dropped")
 }
 
 func TestParseHelpers(t *testing.T) {

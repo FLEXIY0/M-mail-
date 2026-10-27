@@ -3,6 +3,7 @@ import React from 'react';
 import {CloseIcon, Spinner} from './icons';
 
 import {api} from '../api';
+import {avatarColor, initials} from '../format';
 import type {MattermostUser} from '../types';
 
 // A recipient chosen in the composer: a Mattermost user (their e-mail is
@@ -146,7 +147,14 @@ export default function RecipientPicker({value, onChange, disabled, autoFocus, p
                                 src={avatarUrl(p.userId)}
                                 alt=''
                             />
-                        ) : <span className='mml-avatar mml-avatar--mail'>{'@'}</span>}
+                        ) : (
+                            <span
+                                className='mml-avatar mml-avatar--initials'
+                                style={{background: avatarColor({email: p.email || ''})}}
+                            >
+                                {initials({email: p.email || '', name: p.sublabel ? p.label : undefined})}
+                            </span>
+                        )}
                         {p.label}
                         <button
                             type='button'

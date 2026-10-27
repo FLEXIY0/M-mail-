@@ -9,6 +9,7 @@ import type {Me, MessageRef, PluginConfig, Recipient, WizardMode} from './types'
 
 // ComposeRequest opens the composer: a new message, a reply or a forward.
 export interface ComposeRequest {
+    id?: string;
     mode: 'new' | 'reply' | 'reply_all' | 'forward';
     source?: MessageRef;
     to?: Recipient[];
@@ -17,17 +18,26 @@ export interface ComposeRequest {
     mattermostFiles?: Array<{id: string; name: string; size: number}>;
 }
 
+// Everything happens inside the right-hand panel, like in a mobile mail
+// app: the message list is always there, and screens are stacked on top
+// of it (a message, a reply, settings…). "Back" pops the top screen.
+export type Route =
+    | {name: 'message'; ref: MessageRef}
+    | {name: 'compose'; request: ComposeRequest}
+    | {name: 'settings'}
+    | {name: 'icon'}
+    | {name: 'wizard'; mode: WizardMode}
+    | {name: 'share'; ref: MessageRef};
+
 export interface State {
     me: Me | null;
     config: PluginConfig | null;
     loading: boolean;
     loadError: string;
-    wizard: WizardMode | null;
-    compose: ComposeRequest | null;
-    share: MessageRef | null;
+    routes: Route[];
 
-    // Set by "Open" in a notification: the panel shows this message.
-    openRequest: (MessageRef & {nonce: number}) | null;
+    // Set when a notification opens a message from another folder.
+    folderRequest: {folder: string; nonce: number} | null;
 
     // Incremented whenever the mailbox may have changed on the server.
     revision: number;
@@ -38,10 +48,8 @@ let state: State = {
     config: null,
     loading: false,
     loadError: '',
-    wizard: null,
-    compose: null,
-    share: null,
-    openRequest: null,
+    routes: [],
+    folderRequest: null,
     revision: 0,
 };
 
@@ -100,30 +108,81 @@ export async function refreshMe() {
     }
 }
 
+export function topRoute(): Route | undefined {
+    return state.routes[state.routes.length - 1];
+}
+
+// pushRoute opens a screen in the panel; the same screen (the same message,
+// the same draft, settings…) is not stacked twice, it is brought to the top.
+export function pushRoute(route: Route) {
+    const same = (r: Route) => {
+        if (r.name !== route.name) {
+            return false;
+        }
+        switch (route.name) {
+        case 'message':
+            return (r as typeof route).ref.uid === route.ref.uid && (r as typeof route).ref.folder === route.ref.folder;
+        case 'compose':
+            // Several drafts can be open: each keeps its place in the stack.
+            return (r as typeof route).request.id === route.request.id;
+        }
+        return true;
+    };
+    setState({routes: [...state.routes.filter((r) => !same(r)), route]});
+    showPanel();
+}
+
+export function popRoute() {
+    setState({routes: state.routes.slice(0, -1)});
+}
+
+function popWhile(names: Array<Route['name']>) {
+    let routes = state.routes;
+    while (routes.length && names.includes(routes[routes.length - 1].name)) {
+        routes = routes.slice(0, -1);
+    }
+    setState({routes});
+}
+
 export function openWizard(mode: WizardMode) {
     loadAll();
-    setState({wizard: mode});
+    if (mode === 'settings') {
+        pushRoute({name: 'settings'});
+    } else if (mode === 'icon') {
+        pushRoute({name: 'icon'});
+    } else {
+        pushRoute({name: 'wizard', mode});
+    }
 }
 
 export function closeWizard() {
-    setState({wizard: null});
+    popWhile(['wizard', 'settings', 'icon']);
 }
+
+let composeCounter = 0;
 
 export function openCompose(request: ComposeRequest) {
     loadAll();
-    setState({compose: request});
+    composeCounter++;
+    pushRoute({name: 'compose', request: {...request, id: request.id || `c${Date.now()}-${composeCounter}`}});
 }
 
 export function closeCompose() {
-    setState({compose: null});
+    popWhile(['compose']);
 }
 
 export function openShare(ref: MessageRef) {
-    setState({share: ref});
+    pushRoute({name: 'share', ref});
 }
 
 export function closeShare() {
-    setState({share: null});
+    popWhile(['share']);
+}
+
+// openMessage shows a message, e.g. from "Open" in a notification.
+export function openMessage(ref: MessageRef) {
+    setState({routes: [{name: 'message', ref}], folderRequest: {folder: ref.folder, nonce: Date.now()}});
+    showPanel();
 }
 
 // mailChanged makes the panel reload the folders and the list.
@@ -150,11 +209,6 @@ export function setShowPanel(fn: () => void) {
 }
 
 export function openPanel() {
-    showPanel();
-}
-
-export function openMessage(ref: MessageRef) {
-    setState({openRequest: {...ref, nonce: Date.now()}});
     showPanel();
 }
 

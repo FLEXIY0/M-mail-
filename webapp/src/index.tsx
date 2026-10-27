@@ -5,12 +5,9 @@ import type {GlobalState} from '@mattermost/types/store';
 
 import manifest from 'manifest';
 
-import ComposerRoot from './components/Composer';
 import {MailIcon} from './components/icons';
 import Panel, {PanelTitle} from './components/Panel';
-import ShareDialog from './components/ShareDialog';
 import UpdatePanel from './components/UpdatePanel';
-import WizardRoot from './components/Wizard';
 import {
     getState, loadAll, mailChanged, openCompose, openInBrowser, openMessage, openWizard,
     refreshMe, setReduxStore, setShowPanel,
@@ -85,9 +82,6 @@ export default class Plugin {
         const rhs = registerPanel(registry, store);
         setShowPanel(() => store.dispatch(rhs.showRHSPlugin as any));
 
-        registry.registerRootComponent(WizardRoot);
-        registry.registerRootComponent(ComposerRoot);
-        registry.registerRootComponent(ShareDialog);
         if (typeof registry.registerAdminConsoleCustomSetting === 'function') {
             registry.registerAdminConsoleCustomSetting('UpdatePanel', UpdatePanel, {showTitle: true});
         }

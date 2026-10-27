@@ -1,71 +1,66 @@
 import React from 'react';
 
 import {
-    ChevronDown, ChevronLeft, DownloadIcon, ForwardIcon, ImageIcon, MailIcon, MoveIcon,
-    PaperclipIcon, ReplyAllIcon, ReplyIcon, ShareIcon, Spinner, StarIcon, TrashIcon,
+    ArrowLeftIcon, BookmarkIcon, ChevronDown, CircleIcon, DownloadIcon, ForwardIcon,
+    ImageIcon, MoreVerticalIcon, MoveIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, ShareIcon, Spinner,
+    ThumbDownIcon, TrashIcon, InboxIcon,
 } from './icons';
-import {folderTitle} from './Panel';
+import {Avatar, folderTitle, webmailLabel} from './Panel';
 import {ErrorCard} from './shared';
-import {Button, Linkify} from './ui';
+import {Linkify} from './ui';
 
 import type {ApiError} from '../api';
 import {api, attachmentUrl} from '../api';
-import {addressFull, addressLabel, avatarColor, formatFullDate, formatSize, initials} from '../format';
-import {openCompose, openShare} from '../state';
-import type {Folder, Me, Message, MessageRef, MessageSummary} from '../types';
+import {addressFull, addressLabel, formatFullDate, formatSize} from '../format';
+import {mailChanged, openCompose, openInBrowser, openShare, popRoute} from '../state';
+import type {Folder, Me, Message, MessageRef} from '../types';
 
-export default function MessageView({me, msgRef, folders, onBack, onSeen, onChanged, onRemoved}: {
-    me: Me;
-    msgRef: MessageRef;
-    folders: Folder[];
-    onBack: () => void;
-    onSeen: () => void;
-    onChanged: (patch: Partial<MessageSummary>) => void;
-    onRemoved: () => void;
-}) {
+// Folders are listed once per panel and shared by all opened messages.
+let foldersCache: Folder[] | null = null;
+
+function useFolders() {
+    const [folders, setFolders] = React.useState<Folder[]>(foldersCache || []);
+    React.useEffect(() => {
+        api.folders().then((res) => {
+            foldersCache = res.folders;
+            setFolders(res.folders);
+        }).catch(() => {
+            // Moving to a folder is simply not offered.
+        });
+    }, []);
+    return folders;
+}
+
+export default function MessageView({me, msgRef}: {me: Me; msgRef: MessageRef}) {
+    const folders = useFolders();
     const [msg, setMsg] = React.useState<Message | null>(null);
     const [error, setError] = React.useState<ApiError | null>(null);
     const [busy, setBusy] = React.useState(false);
     const [showDetails, setShowDetails] = React.useState(false);
-    const [moveOpen, setMoveOpen] = React.useState(false);
+    const [menu, setMenu] = React.useState<'' | 'move' | 'more'>('');
 
     React.useEffect(() => {
         let cancelled = false;
         api.message(msgRef.folder, msgRef.uid).
-            then((m) => {
-                if (cancelled) {
-                    return;
-                }
-                setMsg(m);
-                if (m.seen) {
-                    onSeen();
-                }
-            }).
+            then((m) => !cancelled && setMsg(m)).
             catch((e: ApiError) => !cancelled && setError(e));
         return () => {
             cancelled = true;
         };
-    }, [msgRef.folder, msgRef.uid]); // eslint-disable-line react-hooks/exhaustive-deps
-
-    // Escape goes back to the list, like in mail apps.
-    React.useEffect(() => {
-        const onKey = (e: KeyboardEvent) => {
-            const target = e.target as HTMLElement | null;
-            if (e.key === 'Escape' && !target?.closest('input, textarea, select, .mml-overlay')) {
-                onBack();
-            }
-        };
-        document.addEventListener('keydown', onKey);
-        return () => document.removeEventListener('keydown', onKey);
-    }, [onBack]);
+    }, [msgRef.folder, msgRef.uid]);
 
     const folder = folders.find((f) => f.name === msgRef.folder);
     const trash = folders.find((f) => f.role === 'trash');
-    const inTrash = folder?.role === 'trash' || !trash;
+    const junk = folders.find((f) => f.role === 'junk');
+    const inbox = folders.find((f) => f.role === 'inbox');
+    const inTrash = folder?.role === 'trash' || (folders.length > 0 && !trash);
+    const inJunk = folder?.role === 'junk';
+    const webUrl = me.icon.custom_web_url || me.web_url || '';
 
     const run = async (fn: () => Promise<void>) => {
         setBusy(true);
         setError(null);
+        setMenu('');
         try {
             await fn();
         } catch (e) {
@@ -78,14 +73,19 @@ export default function MessageView({me, msgRef, folders, onBack, onSeen, onChan
     const toggleFlag = () => msg && run(async () => {
         await api.setFlag(msgRef.folder, [msgRef.uid], 'flagged', !msg.flagged);
         setMsg({...msg, flagged: !msg.flagged});
-        onChanged({flagged: !msg.flagged});
+        mailChanged();
     });
 
-    const markUnread = () => run(async () => {
-        await api.setFlag(msgRef.folder, [msgRef.uid], 'seen', false);
-        onChanged({seen: false});
-        onBack();
+    const toggleSeen = () => msg && run(async () => {
+        await api.setFlag(msgRef.folder, [msgRef.uid], 'seen', !msg.seen);
+        setMsg({...msg, seen: !msg.seen});
+        mailChanged();
     });
+
+    const leave = () => {
+        mailChanged();
+        popRoute();
+    };
 
     const remove = () => run(async () => {
         // eslint-disable-next-line no-alert
@@ -93,99 +93,169 @@ export default function MessageView({me, msgRef, folders, onBack, onSeen, onChan
             return;
         }
         await api.remove(msgRef.folder, [msgRef.uid]);
-        onRemoved();
+        leave();
     });
 
-    const move = (to: string) => run(async () => {
-        setMoveOpen(false);
-        await api.move(msgRef.folder, [msgRef.uid], {to});
-        onRemoved();
+    const move = (target: {to?: string; role?: string}) => run(async () => {
+        await api.move(msgRef.folder, [msgRef.uid], target);
+        leave();
     });
 
     const toolbar = (
-        <div className='mml-toolbar mml-reader__toolbar'>
+        <div className='mml-reader__toolbar'>
             <button
                 type='button'
-                className='mml-icon-btn'
+                className='mml-icon-btn mml-icon-btn--lg'
                 title='К списку писем (Esc)'
                 aria-label='К списку писем'
-                onClick={onBack}
+                onClick={popRoute}
             >
-                <ChevronLeft size={18}/>
+                <ArrowLeftIcon size={22}/>
             </button>
             <span className='mml-reader__folder mml-ellipsis'>{folderTitle(folder, msgRef.folder)}</span>
+            {busy && <Spinner size={14}/>}
             {msg && (
-                <div className='mml-row'>
-                    {busy && <Spinner size={14}/>}
+                <>
                     <button
                         type='button'
-                        className={`mml-icon-btn ${msg.flagged ? 'mml-message__star' : ''}`}
+                        className={`mml-icon-btn mml-icon-btn--lg mml-icon-btn--accent-plain ${msg.flagged ? 'mml-message__flag' : ''}`}
                         title={msg.flagged ? 'Снять флажок' : 'Пометить флажком'}
                         aria-label={msg.flagged ? 'Снять флажок' : 'Пометить флажком'}
                         onClick={toggleFlag}
                     >
-                        <StarIcon
-                            size={16}
+                        <BookmarkIcon
+                            size={20}
                             filled={msg.flagged}
                         />
-                    </button>
-                    <button
-                        type='button'
-                        className='mml-icon-btn'
-                        title='Отметить непрочитанным'
-                        aria-label='Отметить непрочитанным'
-                        onClick={markUnread}
-                    >
-                        <MailIcon size={16}/>
                     </button>
                     <div className='mml-menu-anchor'>
                         <button
                             type='button'
-                            className='mml-icon-btn'
+                            className='mml-icon-btn mml-icon-btn--lg mml-icon-btn--accent-plain'
                             title='Переместить в папку'
                             aria-label='Переместить в папку'
-                            aria-expanded={moveOpen}
-                            onClick={() => setMoveOpen(!moveOpen)}
+                            aria-expanded={menu === 'move'}
+                            onClick={() => setMenu(menu === 'move' ? '' : 'move')}
                         >
-                            <MoveIcon size={16}/>
+                            <MoveIcon size={20}/>
                         </button>
-                        {moveOpen && (
+                        {menu === 'move' && (
                             <ul
                                 className='mml-menu'
                                 role='menu'
-                                onMouseLeave={() => setMoveOpen(false)}
+                                onMouseLeave={() => setMenu('')}
                             >
                                 {folders.filter((f) => !f.no_select && f.name !== msgRef.folder).map((f) => (
                                     <li key={f.name}>
                                         <button
                                             type='button'
                                             role='menuitem'
-                                            onClick={() => move(f.name)}
+                                            onClick={() => move({to: f.name})}
                                         >
-                                            {`${'  '.repeat(f.depth)}${folderTitle(f)}`}
+                                            {`${'\u00a0\u00a0'.repeat(f.depth)}${folderTitle(f)}`}
                                         </button>
                                     </li>
                                 ))}
                             </ul>
                         )}
                     </div>
+                    {(junk || inJunk) && (
+                        <button
+                            type='button'
+                            className='mml-icon-btn mml-icon-btn--lg mml-icon-btn--accent-plain'
+                            title={inJunk ? 'Не спам — во «Входящие»' : 'Это спам'}
+                            aria-label={inJunk ? 'Не спам' : 'Это спам'}
+                            onClick={() => (inJunk ? move({to: inbox?.name || 'INBOX'}) : move({role: 'junk'}))}
+                        >
+                            {inJunk ? <InboxIcon size={20}/> : <ThumbDownIcon size={20}/>}
+                        </button>
+                    )}
                     <button
                         type='button'
-                        className='mml-icon-btn mml-icon-btn--danger'
+                        className='mml-icon-btn mml-icon-btn--lg mml-icon-btn--accent-plain'
                         title={inTrash ? 'Удалить навсегда' : 'В корзину'}
                         aria-label={inTrash ? 'Удалить навсегда' : 'В корзину'}
                         onClick={remove}
                     >
-                        <TrashIcon size={16}/>
+                        <TrashIcon size={20}/>
                     </button>
-                </div>
+                    <div className='mml-menu-anchor'>
+                        <button
+                            type='button'
+                            className='mml-icon-btn mml-icon-btn--lg mml-icon-btn--accent-plain'
+                            title='Ещё'
+                            aria-label='Ещё'
+                            aria-expanded={menu === 'more'}
+                            onClick={() => setMenu(menu === 'more' ? '' : 'more')}
+                        >
+                            <MoreVerticalIcon size={20}/>
+                        </button>
+                        {menu === 'more' && (
+                            <ul
+                                className='mml-menu'
+                                role='menu'
+                                onMouseLeave={() => setMenu('')}
+                            >
+                                <li>
+                                    <button
+                                        type='button'
+                                        role='menuitem'
+                                        onClick={toggleSeen}
+                                    >
+                                        {msg.seen ? 'Отметить непрочитанным' : 'Отметить прочитанным'}
+                                    </button>
+                                </li>
+                                <li>
+                                    <button
+                                        type='button'
+                                        role='menuitem'
+                                        onClick={() => {
+                                            setMenu('');
+                                            openShare(msgRef);
+                                        }}
+                                    >
+                                        {'Отправить в канал Mattermost'}
+                                    </button>
+                                </li>
+                                {webUrl && (
+                                    <li>
+                                        <button
+                                            type='button'
+                                            role='menuitem'
+                                            onClick={() => {
+                                                setMenu('');
+                                                openInBrowser(webUrl);
+                                            }}
+                                        >
+                                            {webmailLabel(me.provider)}
+                                        </button>
+                                    </li>
+                                )}
+                            </ul>
+                        )}
+                    </div>
+                </>
             )}
         </div>
     );
 
+    const onKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            e.stopPropagation();
+            if (menu) {
+                setMenu('');
+            } else {
+                popRoute();
+            }
+        }
+    };
+
     if (!msg) {
         return (
-            <div className='mml-reader'>
+            <div
+                className='mml-reader'
+                onKeyDown={onKeyDown}
+            >
                 {toolbar}
                 {error ? (
                     <div className='mml-mail-notice'>
@@ -199,96 +269,78 @@ export default function MessageView({me, msgRef, folders, onBack, onSeen, onChan
         );
     }
 
+    const avatars = msg.avatars || {};
     const from = msg.from[0];
     const visibleAttachments = (msg.attachments || []).filter((a) => !a.inline);
+    const many = (msg.to || []).length + (msg.cc || []).length > 1;
 
     return (
-        <div className='mml-reader'>
+        <div
+            className='mml-reader'
+            onKeyDown={onKeyDown}
+        >
             {toolbar}
             <div className='mml-reader__scroll'>
-                <h3 className='mml-reader__subject'>{msg.subject || '(без темы)'}</h3>
-                <div className='mml-reader__head'>
-                    <span
-                        className='mml-message__avatar mml-message__avatar--lg'
-                        style={{background: avatarColor(from)}}
-                        aria-hidden='true'
+                <div className='mml-reader__title'>
+                    <button
+                        type='button'
+                        className={`mml-reader__seen ${msg.seen ? '' : 'mml-reader__seen--unread'}`}
+                        title={msg.seen ? 'Отметить непрочитанным' : 'Отметить прочитанным'}
+                        aria-label={msg.seen ? 'Отметить непрочитанным' : 'Отметить прочитанным'}
+                        onClick={toggleSeen}
                     >
-                        {initials(from)}
-                    </span>
-                    <div className='mml-reader__people'>
-                        <div className='mml-reader__from'>
-                            <strong>{addressLabel(from) || '(без отправителя)'}</strong>
-                            {from?.name && <span className='mml-muted'>{` <${from.email}>`}</span>}
-                        </div>
-                        <button
-                            type='button'
-                            className='mml-reader__to mml-muted'
-                            onClick={() => setShowDetails(!showDetails)}
-                            aria-expanded={showDetails}
-                        >
-                            <span className='mml-ellipsis'>{`Кому: ${msg.to.map(addressLabel).join(', ') || '—'}${msg.cc.length ? `, копия: ${msg.cc.map(addressLabel).join(', ')}` : ''}`}</span>
-                            <ChevronDown size={12}/>
-                        </button>
-                        {showDetails && (
-                            <dl className='mml-reader__details'>
-                                <dt>{'От'}</dt>
-                                <dd>{msg.from.map(addressFull).join(', ')}</dd>
-                                <dt>{'Кому'}</dt>
-                                <dd>{msg.to.map(addressFull).join(', ') || '—'}</dd>
-                                {msg.cc.length > 0 && (
-                                    <>
-                                        <dt>{'Копия'}</dt>
-                                        <dd>{msg.cc.map(addressFull).join(', ')}</dd>
-                                    </>
-                                )}
-                                {msg.reply_to.length > 0 && msg.reply_to[0].email !== from?.email && (
-                                    <>
-                                        <dt>{'Ответ на'}</dt>
-                                        <dd>{msg.reply_to.map(addressFull).join(', ')}</dd>
-                                    </>
-                                )}
-                                <dt>{'Дата'}</dt>
-                                <dd>{new Date(msg.date).toLocaleString('ru-RU')}</dd>
-                            </dl>
-                        )}
-                    </div>
-                    <span className='mml-reader__date mml-muted mml-small'>{formatFullDate(msg.date)}</span>
+                        <CircleIcon
+                            size={16}
+                            filled={!msg.seen}
+                        />
+                    </button>
+                    <h3 className='mml-reader__subject'>{msg.subject || '(без темы)'}</h3>
                 </div>
+                <div className='mml-reader__date'>{formatFullDate(msg.date)}</div>
 
-                <div className='mml-reader__actions'>
-                    <Button
-                        size='sm'
-                        onClick={() => openCompose({mode: 'reply', source: msgRef})}
+                <div className='mml-reader__from-row'>
+                    <span className='mml-reader__label'>{'От:'}</span>
+                    <span
+                        className='mml-person-chip'
+                        title={from ? addressFull(from) : ''}
                     >
-                        <ReplyIcon size={14}/>
-                        {'Ответить'}
-                    </Button>
-                    {((msg.to || []).length + (msg.cc || []).length > 1) && (
-                        <Button
-                            size='sm'
-                            onClick={() => openCompose({mode: 'reply_all', source: msgRef})}
-                        >
-                            <ReplyAllIcon size={14}/>
-                            {'Всем'}
-                        </Button>
-                    )}
-                    <Button
-                        size='sm'
-                        onClick={() => openCompose({mode: 'forward', source: msgRef})}
+                        <Avatar
+                            address={from}
+                            avatars={avatars}
+                            size={28}
+                        />
+                        <span className='mml-ellipsis'>{addressLabel(from) || '(без отправителя)'}</span>
+                    </span>
+                    <button
+                        type='button'
+                        className='mml-link mml-reader__more'
+                        onClick={() => setShowDetails(!showDetails)}
+                        aria-expanded={showDetails}
                     >
-                        <ForwardIcon size={14}/>
-                        {'Переслать'}
-                    </Button>
-                    <Button
-                        size='sm'
-                        variant='tertiary'
-                        title='Опубликовать письмо в текущем канале Mattermost'
-                        onClick={() => openShare(msgRef)}
-                    >
-                        <ShareIcon size={14}/>
-                        {'В канал'}
-                    </Button>
+                        {showDetails ? 'Скрыть' : 'Подробнее'}
+                        <ChevronDown size={12}/>
+                    </button>
                 </div>
+                {showDetails && (
+                    <dl className='mml-reader__details'>
+                        <dt>{'От'}</dt>
+                        <dd>{msg.from.map(addressFull).join(', ')}</dd>
+                        <dt>{'Кому'}</dt>
+                        <dd>{msg.to.map(addressFull).join(', ') || '—'}</dd>
+                        {msg.cc.length > 0 && (
+                            <>
+                                <dt>{'Копия'}</dt>
+                                <dd>{msg.cc.map(addressFull).join(', ')}</dd>
+                            </>
+                        )}
+                        {msg.reply_to.length > 0 && msg.reply_to[0].email !== from?.email && (
+                            <>
+                                <dt>{'Ответ на'}</dt>
+                                <dd>{msg.reply_to.map(addressFull).join(', ')}</dd>
+                            </>
+                        )}
+                    </dl>
+                )}
 
                 {error && (
                     <ErrorCard
@@ -297,10 +349,12 @@ export default function MessageView({me, msgRef, folders, onBack, onSeen, onChan
                     />
                 )}
 
-                <MessageBody
-                    msg={msg}
-                    loadImages={Boolean(me.settings?.load_images)}
-                />
+                <div className='mml-reader__body'>
+                    <MessageBody
+                        msg={msg}
+                        loadImages={Boolean(me.settings?.load_images)}
+                    />
+                </div>
 
                 {msg.truncated && <div className='mml-hint'>{'Письмо очень длинное, показано начало. Полностью — в веб-почте.'}</div>}
 
@@ -331,6 +385,44 @@ export default function MessageView({me, msgRef, folders, onBack, onSeen, onChan
                         </ul>
                     </div>
                 )}
+            </div>
+
+            <div className='mml-reader__bar'>
+                <button
+                    type='button'
+                    className='mml-reader__action mml-reader__action--primary'
+                    onClick={() => openCompose({mode: 'reply', source: msgRef})}
+                >
+                    <ReplyIcon size={18}/>
+                    <span>{'Ответить'}</span>
+                </button>
+                {many && (
+                    <button
+                        type='button'
+                        className='mml-reader__action'
+                        onClick={() => openCompose({mode: 'reply_all', source: msgRef})}
+                    >
+                        <ReplyAllIcon size={18}/>
+                        <span>{'Всем'}</span>
+                    </button>
+                )}
+                <button
+                    type='button'
+                    className='mml-reader__action'
+                    onClick={() => openCompose({mode: 'forward', source: msgRef})}
+                >
+                    <ForwardIcon size={18}/>
+                    <span>{'Переслать'}</span>
+                </button>
+                <button
+                    type='button'
+                    className='mml-reader__action'
+                    title='Опубликовать письмо в текущем канале Mattermost'
+                    onClick={() => openShare(msgRef)}
+                >
+                    <ShareIcon size={18}/>
+                    <span>{'В канал'}</span>
+                </button>
             </div>
         </div>
     );
@@ -416,7 +508,7 @@ export function buildDocument(html: string, allowRemote: boolean) {
         `</head><body>${body}</body></html>`;
 }
 
-function HtmlFrame({html, allowRemote}: {html: string; allowRemote: boolean}) {
+export function HtmlFrame({html, allowRemote}: {html: string; allowRemote: boolean}) {
     const ref = React.useRef<HTMLIFrameElement>(null);
     const [height, setHeight] = React.useState(200);
     const doc = React.useMemo(() => buildDocument(html, allowRemote), [html, allowRemote]);

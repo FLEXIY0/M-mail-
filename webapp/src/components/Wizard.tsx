@@ -8,7 +8,7 @@ import IconSettingsDialog from './IconSettings';
 import {MailSettings} from './MailSettings';
 import SettingsDialog from './SettingsDialog';
 import {ErrorCard, HelpText} from './shared';
-import {Button, Callout, Details, LinkButton, Modal} from './ui';
+import {Button, Callout, Details, LinkButton, PanelPage} from './ui';
 
 import type {ApiError} from '../api';
 import {api} from '../api';
@@ -31,18 +31,14 @@ type CheckPhase = 'idle' | 'checking' | 'ok' | 'error';
 // WizardRoot is registered as a root component and shows the wizard or the
 // settings dialog when requested from the panel, a slash command or a
 // websocket event.
-export default function WizardRoot() {
-    const mode = useStore((s) => s.wizard);
+export default function WizardRoot({mode}: {mode: WizardMode}) {
     const config = useStore((s) => s.config);
     const me = useStore((s) => s.me);
     const loadError = useStore((s) => s.loadError);
 
-    if (!mode) {
-        return null;
-    }
     if (!config || !me) {
         return (
-            <Modal
+            <PanelPage
                 title='Почта'
                 onClose={closeWizard}
                 width={480}
@@ -57,7 +53,7 @@ export default function WizardRoot() {
                 ) : (
                     <div className='mml-center'><Spinner size={24}/></div>
                 )}
-            </Modal>
+            </PanelPage>
         );
     }
     if (mode === 'icon' || (mode === 'settings' && !me.connected)) {
@@ -340,7 +336,7 @@ function Wizard({mode, config, me}: {mode: WizardMode; config: PluginConfig; me:
     }
 
     return (
-        <Modal
+        <PanelPage
             title={reconnect ? 'Переподключение почты' : 'Подключение почты'}
             onClose={step === 'done' ? closeWizard : close}
             footer={(
@@ -367,7 +363,7 @@ function Wizard({mode, config, me}: {mode: WizardMode; config: PluginConfig; me:
             >
                 {body}
             </div>
-        </Modal>
+        </PanelPage>
     );
 }
 

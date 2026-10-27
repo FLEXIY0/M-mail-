@@ -36,8 +36,9 @@ type Plugin struct {
 	updateJob *cluster.Job
 	updater   *updater
 
-	sessions *sessionPool
-	limiter  *rateLimiter
+	sessions  *sessionPool
+	directory *userDirectory
+	limiter   *rateLimiter
 	// sendLimiter keeps a hijacked session from turning the plugin into a
 	// spam relay.
 	sendLimiter *rateLimiter
@@ -63,6 +64,7 @@ func (p *Plugin) OnActivate() error {
 	p.limiter = newRateLimiter(10, 10*time.Minute)
 	p.sendLimiter = newRateLimiter(60, time.Hour)
 	p.sessions = newSessionPool(sessionIdleTimeout)
+	p.directory = newUserDirectory()
 	p.updater = newUpdater()
 
 	if err := p.ensureEncryptionKey(); err != nil {

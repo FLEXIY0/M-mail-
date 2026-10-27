@@ -33,6 +33,7 @@ type sessionPool struct {
 type session struct {
 	mu       sync.Mutex
 	conn     *mailclient.IMAP
+	previews *mailclient.PreviewCache
 	key      string
 	lastUsed time.Time
 }
@@ -181,6 +182,10 @@ func (p *Plugin) withIMAP(ctx context.Context, userID string, account *store.Acc
 			}
 			return err
 		}
+		if s.previews == nil || s.key != key {
+			s.previews = mailclient.NewPreviewCache()
+		}
+		conn.SetPreviewCache(s.previews)
 		s.conn, s.key, fresh = conn, key, true
 		return nil
 	}

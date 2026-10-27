@@ -369,3 +369,91 @@ export const MoveIcon = (p: IconProps) => (
         <path d='M10 14h6M13.5 11.5L16 14l-2.5 2.5'/>
     </Svg>
 );
+
+export const ArrowLeftIcon = (p: IconProps) => <Svg {...p}><path d='M20 12H4M10 6l-6 6 6 6'/></Svg>;
+
+export const MenuIcon = (p: IconProps) => <Svg {...p}><path d='M4 6h16M4 12h16M4 18h16'/></Svg>;
+
+export const SlidersIcon = (p: IconProps) => (
+    <Svg {...p}>
+        <path d='M4 7h9M17 7h3M4 17h3M11 17h9'/>
+        <circle
+            cx='15'
+            cy='7'
+            r='2'
+        />
+        <circle
+            cx='9'
+            cy='17'
+            r='2'
+        />
+    </Svg>
+);
+
+export const ThumbDownIcon = (p: IconProps) => (
+    <Svg {...p}>
+        <path d='M17 3v11M17 3h2.5A1.5 1.5 0 0 1 21 4.5v8a1.5 1.5 0 0 1-1.5 1.5H17l-4 7a2 2 0 0 1-2-2v-4H5.5a2 2 0 0 1-2-2.3l1.2-7A2 2 0 0 1 6.7 3z'/>
+    </Svg>
+);
+
+export const MoreVerticalIcon = (p: IconProps) => (
+    <svg
+        className={p.className}
+        width={p.size || 16}
+        height={p.size || 16}
+        viewBox='0 0 24 24'
+        fill='currentColor'
+        aria-hidden='true'
+    >
+        <circle
+            cx='12'
+            cy='5'
+            r='1.8'
+        />
+        <circle
+            cx='12'
+            cy='12'
+            r='1.8'
+        />
+        <circle
+            cx='12'
+            cy='19'
+            r='1.8'
+        />
+    </svg>
+);
+
+export const BookmarkIcon = ({filled, ...p}: IconProps & {filled?: boolean}) => (
+    <svg
+        className={p.className}
+        width={p.size || 16}
+        height={p.size || 16}
+        viewBox='0 0 24 24'
+        fill={filled ? 'currentColor' : 'none'}
+        stroke='currentColor'
+        strokeWidth={2}
+        strokeLinejoin='round'
+        aria-hidden='true'
+    >
+        <path d='M6 3.5h12a1 1 0 0 1 1 1V21l-7-4.5L5 21V4.5a1 1 0 0 1 1-1z'/>
+    </svg>
+);
+
+export const CircleIcon = ({filled, ...p}: IconProps & {filled?: boolean}) => (
+    <svg
+        className={p.className}
+        width={p.size || 16}
+        height={p.size || 16}
+        viewBox='0 0 24 24'
+        aria-hidden='true'
+    >
+        <circle
+            cx='12'
+            cy='12'
+            r={filled ? 6 : 7}
+            fill={filled ? 'currentColor' : 'none'}
+            stroke='currentColor'
+            strokeWidth={2}
+        />
+    </svg>
+);

@@ -2,7 +2,7 @@ import React from 'react';
 
 import {MailIcon, CheckIcon, ExternalIcon} from './icons';
 import {ErrorCard} from './shared';
-import {Button, Modal} from './ui';
+import {Button, PanelPage} from './ui';
 
 import type {ApiError} from '../api';
 import {api} from '../api';
@@ -168,7 +168,7 @@ export default function IconSettingsDialog() {
     };
 
     return (
-        <Modal
+        <PanelPage
             title='Что открывает иконка почты'
             onClose={closeWizard}
             width={560}
@@ -211,6 +211,6 @@ export default function IconSettingsDialog() {
                 providers={config.providers}
             />
             {error && <ErrorCard error={error}/>}
-        </Modal>
+        </PanelPage>
     );
 }

@@ -29,7 +29,8 @@ type IMAP struct {
 	selected         string
 	selectedReadOnly bool
 
-	folders []Folder
+	folders  []Folder
+	previews *PreviewCache
 }
 
 // DialIMAP connects, logs in and returns a ready connection.
@@ -370,6 +371,8 @@ type Summary struct {
 	HasAttachments bool      `json:"has_attachments"`
 	Size           int64     `json:"size"`
 	MessageID      string    `json:"message_id,omitempty"`
+	// Preview is the beginning of the text, for the second line in the list.
+	Preview string `json:"preview,omitempty"`
 }
 
 func summaryOf(buf *imapclient.FetchMessageBuffer) Summary {
@@ -455,41 +458,65 @@ func (m *IMAP) List(ctx context.Context, folder string, offset, limit int) (*Pag
 	for _, buf := range bufs {
 		page.Messages = append(page.Messages, summaryOf(buf))
 	}
+	m.fillPreviews(ctx, folder, data.UIDValidity, bufs, page.Messages)
 	page.HasMore = lo > 1
 	return page, nil
 }
 
-// Search finds messages by sender, recipient or subject, newest first.
-func (m *IMAP) Search(ctx context.Context, folder, query string, limit int) (*Page, error) {
+// Filters narrow the message list, like "unread" in mail apps.
+const (
+	FilterUnseen      = "unseen"
+	FilterFlagged     = "flagged"
+	FilterAttachments = "attachments"
+)
+
+// Search finds messages by sender, recipient or subject and/or a filter,
+// newest first. offset skips messages already shown.
+func (m *IMAP) Search(ctx context.Context, folder, query, filter string, offset, limit int) (*Page, error) {
 	query = strings.TrimSpace(query)
-	if _, err := m.selectFolder(ctx, folder, true); err != nil {
+	data, err := m.selectFolder(ctx, folder, true)
+	if err != nil {
 		return nil, err
 	}
-	header := func(key string) imap.SearchCriteria {
-		return imap.SearchCriteria{Header: []imap.SearchCriteriaHeaderField{{Key: key, Value: query}}}
+	criteria := &imap.SearchCriteria{}
+	if query != "" {
+		header := func(key string) imap.SearchCriteria {
+			return imap.SearchCriteria{Header: []imap.SearchCriteriaHeaderField{{Key: key, Value: query}}}
+		}
+		criteria.Or = [][2]imap.SearchCriteria{{
+			{Or: [][2]imap.SearchCriteria{{header("From"), header("Subject")}}},
+			header("To"),
+		}}
 	}
-	criteria := &imap.SearchCriteria{Or: [][2]imap.SearchCriteria{{
-		{Or: [][2]imap.SearchCriteria{{header("From"), header("Subject")}}},
-		header("To"),
-	}}}
-	var data *imap.SearchData
-	err := m.do(ctx, "search", func() error {
+	switch filter {
+	case FilterUnseen:
+		criteria.NotFlag = []imap.Flag{imap.FlagSeen}
+	case FilterFlagged:
+		criteria.Flag = []imap.Flag{imap.FlagFlagged}
+	case FilterAttachments:
+		// IMAP can not search by attachments; messages with files are
+		// almost always multipart/mixed.
+		criteria.Header = append(criteria.Header, imap.SearchCriteriaHeaderField{Key: "Content-Type", Value: "multipart/mixed"})
+	}
+	var found *imap.SearchData
+	err = m.do(ctx, "search", func() error {
 		var err error
-		data, err = m.client.UIDSearch(criteria, nil).Wait()
+		found, err = m.client.UIDSearch(criteria, nil).Wait()
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	uids := data.AllUIDs()
+	uids := found.AllUIDs()
 	sort.Slice(uids, func(i, j int) bool { return uids[i] > uids[j] })
 	page := &Page{Messages: []Summary{}, Total: len(uids)}
+	if offset >= len(uids) {
+		return page, nil
+	}
+	uids = uids[offset:]
 	if len(uids) > limit {
 		uids = uids[:limit]
 		page.HasMore = true
-	}
-	if len(uids) == 0 {
-		return page, nil
 	}
 	bufs, err := m.fetchUIDs(ctx, uids, summaryFetch)
 	if err != nil {
@@ -499,6 +526,7 @@ func (m *IMAP) Search(ctx context.Context, folder, query string, limit int) (*Pa
 	for _, buf := range bufs {
 		page.Messages = append(page.Messages, summaryOf(buf))
 	}
+	m.fillPreviews(ctx, folder, data.UIDValidity, bufs, page.Messages)
 	return page, nil
 }
 
