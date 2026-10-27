@@ -1,0 +1,1736 @@
+// All colors come from the Mattermost theme variables, so the plugin looks
+// native in light and dark themes alike. Every class is prefixed with "mml-"
+// to avoid clashes with Mattermost and other plugins.
+
+$bg: var(--center-channel-bg, #fff);
+$fg: var(--center-channel-color, #3f4350);
+$fg-rgb: var(--center-channel-color-rgb, 63, 67, 80);
+$accent: var(--button-bg, #1c58d9);
+$accent-rgb: var(--button-bg-rgb, 28, 88, 217);
+$accent-fg: var(--button-color, #fff);
+$link: var(--link-color, #386fe5);
+$error-rgb: var(--error-text-color-rgb, 210, 75, 78);
+$success-rgb: var(--online-indicator-rgb, 6, 214, 160);
+$warning-rgb: var(--away-indicator-rgb, 255, 188, 31);
+
+@function fg($alpha) {
+    @return rgba($fg-rgb, $alpha);
+}
+
+@function accent($alpha) {
+    @return rgba($accent-rgb, $alpha);
+}
+
+%focus {
+    outline: 2px solid accent(0.5);
+    outline-offset: 1px;
+}
+
+@keyframes mml-spin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes mml-fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+}
+
+@keyframes mml-pop {
+    0% { transform: scale(0.6); opacity: 0; }
+    60% { transform: scale(1.08); opacity: 1; }
+    100% { transform: scale(1); }
+}
+
+@keyframes mml-shimmer {
+    0% { background-position: -200px 0; }
+    100% { background-position: 200px 0; }
+}
+
+.mml-spinner {
+    display: inline-block;
+    flex: none;
+    border: 2px solid fg(0.16);
+    border-top-color: $accent;
+    border-radius: 50%;
+    animation: mml-spin 0.8s linear infinite;
+}
+
+.mml-spin svg {
+    animation: mml-spin 0.8s linear infinite;
+}
+
+.mml-muted { color: fg(0.64); }
+.mml-small { font-size: 12px; }
+.mml-center { display: flex; justify-content: center; padding: 24px; }
+.mml-row { display: flex; gap: 8px; align-items: center; }
+.mml-ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mml-inline-icon { display: inline-flex; vertical-align: -3px; margin-right: 6px; }
+
+.mml-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 6px;
+}
+
+.mml-code {
+    display: block;
+    padding: 8px;
+    border-radius: 4px;
+    background: fg(0.06);
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+// Buttons ------------------------------------------------------------------
+
+.mml-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: none;
+    border-radius: 4px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    text-decoration: none !important;
+    white-space: nowrap;
+    transition: background 0.15s, box-shadow 0.15s, color 0.15s;
+
+    &:focus-visible { @extend %focus; }
+    &:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    &--sm { height: 28px; padding: 0 10px; font-size: 12px; }
+    &--md { height: 36px; padding: 0 16px; font-size: 14px; }
+    &--square { width: 36px; padding: 0; }
+
+    &--neutral {
+        background: fg(0.08);
+        color: fg(0.88) !important;
+        &:hover:not(:disabled) { background: fg(0.14); color: $fg !important; }
+    }
+    &--lg { height: 44px; padding: 0 20px; font-size: 15px; }
+
+    &--primary {
+        background: $accent;
+        color: $accent-fg !important;
+        &:hover:not(:disabled) { box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0.08); }
+    }
+
+    &--secondary {
+        background: accent(0.08);
+        color: $accent !important;
+        &:hover:not(:disabled) { background: accent(0.14); }
+    }
+
+    &--tertiary, &--ghost {
+        background: transparent;
+        color: $accent !important;
+        &:hover:not(:disabled) { background: accent(0.08); }
+    }
+
+    &--danger {
+        background: rgb($error-rgb);
+        color: #fff !important;
+        &:hover:not(:disabled) { box-shadow: inset 0 0 0 100px rgba(0, 0, 0, 0.1); }
+    }
+}
+
+.mml-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 4px;
+    background: transparent;
+    color: fg(0.64);
+    cursor: pointer;
+
+    &:hover:not(:disabled) { background: fg(0.08); color: fg(0.8); }
+    &:focus-visible { @extend %focus; }
+    &:disabled { opacity: 0.6; cursor: default; }
+}
+
+.mml-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0;
+    border: none;
+    background: none;
+    color: $link;
+    font: inherit;
+    cursor: pointer;
+
+    &:hover { text-decoration: underline; }
+    &--danger { color: rgb($error-rgb); }
+}
+
+// Form controls --------------------------------------------------------------
+
+.mml-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 16px;
+    font-weight: normal;
+
+    &__label { font-size: 14px; font-weight: 600; color: $fg; }
+    &__hint { font-size: 12px; color: fg(0.64); line-height: 16px; }
+}
+
+.mml-optional { font-weight: normal; color: fg(0.56); }
+
+.mml-input, .mml-select {
+    width: 100%;
+    height: 40px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 4px;
+    box-shadow: inset 0 0 0 1px fg(0.16);
+    background: $bg;
+    color: $fg;
+    font-size: 14px;
+    font-family: inherit;
+    transition: box-shadow 0.15s;
+
+    &:hover { box-shadow: inset 0 0 0 1px fg(0.48); }
+    &:focus { outline: none; box-shadow: inset 0 0 0 2px $accent; }
+    &:disabled { opacity: 0.6; }
+    &::placeholder { color: fg(0.48); }
+}
+
+.mml-select {
+    width: auto;
+    height: 32px;
+    padding: 0 8px;
+}
+
+.mml-input-group {
+    position: relative;
+    display: flex;
+    align-items: center;
+
+    .mml-input { padding-right: 44px; }
+    .mml-icon-btn { position: absolute; right: 4px; }
+}
+
+.mml-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    font-weight: normal;
+    cursor: pointer;
+
+    input { margin: 0; accent-color: $accent; width: 16px; height: 16px; }
+}
+
+.mml-hint {
+    margin-top: 8px;
+    font-size: 12px;
+    color: fg(0.64);
+
+    &--warn { color: rgb($error-rgb); }
+}
+
+// Switch ------------------------------------------------------------------------
+
+.mml-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+
+    &__icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        flex: none;
+        border-radius: 8px;
+        background: accent(0.08);
+        color: $accent;
+    }
+
+    &__text {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 2px;
+        margin: 0;
+        font-weight: normal;
+        cursor: pointer;
+    }
+
+    &__label { font-weight: 600; font-size: 14px; }
+    &__desc { font-size: 12px; color: fg(0.64); line-height: 16px; }
+}
+
+.mml-switch {
+    position: relative;
+    width: 40px;
+    height: 24px;
+    flex: none;
+    padding: 0;
+    border: none;
+    border-radius: 12px;
+    background: fg(0.24);
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:focus-visible { @extend %focus; }
+
+    &__knob {
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        transition: transform 0.15s;
+    }
+
+    &--on {
+        background: $accent;
+        .mml-switch__knob { transform: translateX(16px); }
+    }
+}
+
+// Chips -----------------------------------------------------------------------
+
+.mml-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+}
+
+.mml-chip {
+    height: 30px;
+    padding: 0 12px;
+    border: none;
+    border-radius: 15px;
+    box-shadow: inset 0 0 0 1px fg(0.16);
+    background: transparent;
+    color: $fg;
+    font-size: 13px;
+    cursor: pointer;
+    transition: all 0.15s;
+
+    &:hover { box-shadow: inset 0 0 0 1px fg(0.4); }
+    &:focus-visible { @extend %focus; }
+
+    &--on {
+        background: accent(0.12);
+        box-shadow: inset 0 0 0 1px $accent;
+        color: $accent;
+        font-weight: 600;
+    }
+}
+
+.mml-tag {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 4px;
+    background: rgba($warning-rgb, 0.16);
+    color: $fg;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+
+    &--muted { background: fg(0.08); color: fg(0.64); }
+}
+
+// Callouts, details -------------------------------------------------------
+
+.mml-callout {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    padding: 12px 14px;
+    border-radius: 6px;
+    border-left: 3px solid;
+    font-size: 13px;
+    line-height: 18px;
+    animation: mml-fade-in 0.2s ease-out;
+
+    &__content { flex: 1; min-width: 0; }
+    &__title { margin-bottom: 2px; font-weight: 600; }
+    &__action { flex: none; }
+
+    &--info { background: accent(0.06); border-color: $accent; }
+    &--warning { background: rgba($warning-rgb, 0.12); border-color: rgb($warning-rgb); }
+    &--error { background: rgba($error-rgb, 0.08); border-color: rgb($error-rgb); }
+    &--success { background: rgba($success-rgb, 0.1); border-color: rgb($success-rgb); }
+}
+
+.mml-details {
+    margin-top: 12px;
+    font-size: 13px;
+
+    summary {
+        color: $link;
+        cursor: pointer;
+        list-style: revert;
+    }
+
+    &__body {
+        padding: 8px 0 0 16px;
+        color: fg(0.8);
+
+        ul { margin: 0; padding-left: 16px; }
+        li + li { margin-top: 4px; }
+    }
+}
+
+// Modal --------------------------------------------------------------------------
+
+.mml-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(0, 0, 0, 0.5);
+    animation: mml-fade-in 0.15s ease-out;
+}
+
+.mml-modal {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    max-height: calc(100vh - 48px);
+    border-radius: 12px;
+    background: $bg;
+    color: $fg;
+    box-shadow: 0 20px 32px rgba(0, 0, 0, 0.24);
+
+    &__header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 20px 20px 12px 28px;
+    }
+
+    &__title { font-size: 20px; font-weight: 600; line-height: 28px; }
+
+    &__body {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0 28px 16px;
+    }
+
+    &__footer {
+        padding: 16px 28px 20px;
+        border-top: 1px solid fg(0.12);
+    }
+}
+
+// Wizard -----------------------------------------------------------------------------
+
+.mml-wizard {
+    &__body { animation: mml-fade-in 0.2s ease-out; min-height: 280px; }
+
+    &__footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+    }
+
+    &__help { flex: 1; font-size: 12px; color: fg(0.64); white-space: pre-wrap; }
+    &__buttons { display: flex; gap: 8px; }
+}
+
+.mml-stepper {
+    display: flex;
+    gap: 4px;
+    margin: 4px 0 24px;
+    padding: 0;
+    list-style: none;
+
+    &__item {
+        flex: 1;
+        position: relative;
+
+        button {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            width: 100%;
+            padding: 0;
+            border: none;
+            background: none;
+            color: fg(0.56);
+            font-size: 12px;
+            cursor: default;
+        }
+
+        &::before {
+            content: '';
+            position: absolute;
+            top: 12px;
+            left: calc(-50% + 16px);
+            right: calc(50% + 16px);
+            height: 2px;
+            border-radius: 1px;
+            background: fg(0.12);
+        }
+
+        &:first-child::before { display: none; }
+
+        &--done {
+            &::before { background: $accent; }
+            button { color: $fg; cursor: pointer; }
+            .mml-stepper__dot { background: $accent; color: $accent-fg; }
+        }
+
+        &--current {
+            &::before { background: $accent; }
+            button { color: $fg; font-weight: 600; }
+            .mml-stepper__dot { box-shadow: 0 0 0 2px $accent; color: $accent; background: $bg; }
+        }
+    }
+
+    &__dot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        background: fg(0.08);
+        font-size: 12px;
+        font-weight: 600;
+        transition: all 0.2s;
+    }
+}
+
+.mml-step-title {
+    margin: 0 0 8px;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 24px;
+}
+
+.mml-lead {
+    margin: 0 0 16px;
+    color: fg(0.8);
+    font-size: 14px;
+    line-height: 20px;
+}
+
+.mml-welcome {
+    text-align: center;
+
+    h2 { margin: 12px 0 8px; font-size: 22px; font-weight: 600; }
+
+    .mml-benefits { text-align: left; margin: 20px auto; max-width: 440px; }
+    .mml-callout { text-align: left; }
+
+    &__icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 72px;
+        height: 72px;
+        border-radius: 20px;
+        background: accent(0.1);
+        color: $accent;
+    }
+}
+
+.mml-benefits {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin: 0 0 20px;
+    padding: 0;
+    list-style: none;
+
+    li { display: flex; gap: 12px; align-items: flex-start; font-size: 14px; line-height: 20px; }
+    svg { flex: none; margin-top: 2px; color: $accent; }
+
+    &--compact {
+        gap: 8px;
+        li { font-size: 13px; }
+    }
+}
+
+.mml-providers {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 10px;
+}
+
+.mml-provider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px;
+    border: none;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px fg(0.16);
+    background: $bg;
+    color: $fg;
+    text-align: left;
+    cursor: pointer;
+    transition: box-shadow 0.15s, background 0.15s;
+
+    &:hover { box-shadow: inset 0 0 0 1px fg(0.4); }
+    &:focus-visible { @extend %focus; }
+
+    &--active {
+        background: accent(0.06);
+        box-shadow: inset 0 0 0 2px $accent !important;
+    }
+
+    &__badge {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        flex: none;
+        border-radius: 10px;
+        color: #fff;
+        font-weight: 700;
+        font-size: 14px;
+    }
+
+    &__text { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
+    &__name { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-weight: 600; font-size: 14px; }
+    &__tag { flex: none; }
+    &__desc { font-size: 12px; color: fg(0.64); line-height: 16px; }
+    &__check { width: 16px; color: $accent; }
+}
+
+.mml-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    margin: 0 0 20px;
+    padding: 0;
+    list-style: none;
+
+    li { display: flex; gap: 12px; align-items: flex-start; }
+
+    &__num {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        flex: none;
+        border-radius: 50%;
+        background: accent(0.12);
+        color: $accent;
+        font-size: 12px;
+        font-weight: 700;
+    }
+
+    &__text { font-size: 14px; line-height: 22px; padding-top: 1px; }
+}
+
+.mml-examples {
+    margin: 6px 0 0;
+    padding-left: 18px;
+    font-size: 13px;
+
+    code { font-size: 12px; }
+}
+
+.mml-cta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.mml-form__advanced { margin-bottom: 16px; font-size: 13px; }
+
+.mml-progress {
+    margin: 4px 0 0;
+    padding: 14px 16px;
+    border-radius: 8px;
+    background: fg(0.04);
+    list-style: none;
+    font-size: 13px;
+
+    li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: fg(0.48);
+        transition: color 0.2s;
+        & + li { margin-top: 8px; }
+    }
+
+    &__item--active { color: $fg !important; }
+    &__icon { display: flex; width: 14px; justify-content: center; color: rgb($success-rgb); }
+
+    &__dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: fg(0.24);
+    }
+
+    &__ok {
+        color: rgb($success-rgb) !important;
+        font-weight: 600;
+        animation: mml-fade-in 0.2s ease-out;
+    }
+}
+
+.mml-error-card {
+    margin-top: 8px;
+    padding: 14px 16px;
+    border-radius: 8px;
+    background: rgba($error-rgb, 0.08);
+    box-shadow: inset 0 0 0 1px rgba($error-rgb, 0.24);
+    animation: mml-fade-in 0.2s ease-out;
+
+    &__title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+        color: rgb($error-rgb);
+        font-weight: 600;
+    }
+
+    &__tips {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 13px;
+        line-height: 19px;
+        li + li { margin-top: 4px; }
+    }
+}
+
+.mml-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+
+    &__block {
+        padding: 14px 16px;
+        border-radius: 8px;
+        box-shadow: inset 0 0 0 1px fg(0.12);
+
+        &--muted { box-shadow: none; background: fg(0.04); font-size: 13px; }
+    }
+
+    &__head { display: flex; gap: 12px; align-items: flex-start; }
+
+    &__icon {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        flex: none;
+        border-radius: 8px;
+        background: accent(0.08);
+        color: $accent;
+    }
+
+    &__title { font-weight: 600; font-size: 14px; }
+    &__desc { font-size: 12px; color: fg(0.64); line-height: 16px; }
+
+    &__inline {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 16px;
+        margin: 12px 0 0 44px;
+    }
+}
+
+.mml-done {
+    text-align: center;
+
+    h2 { margin: 12px 0 6px; font-size: 22px; font-weight: 600; }
+
+    &__check {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 72px;
+        height: 72px;
+        border-radius: 50%;
+        background: rgb($success-rgb);
+        color: #fff;
+        animation: mml-pop 0.4s ease-out;
+    }
+
+    &__card {
+        margin: 16px auto;
+        max-width: 420px;
+        padding: 14px 16px;
+        border-radius: 8px;
+        background: fg(0.04);
+        text-align: left;
+    }
+
+    &__card-title {
+        margin-bottom: 8px;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+        color: fg(0.64);
+    }
+
+    &__event {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+        & + & { margin-top: 6px; }
+    }
+
+    &__dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+    &__time { color: fg(0.64); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    &__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+
+    .mml-benefits { max-width: 420px; margin: 0 auto; text-align: left; }
+}
+
+.mml-section {
+    padding: 16px 0;
+    border-bottom: 1px solid fg(0.08);
+
+    &:last-child { border-bottom: none; }
+    &__title { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+    &--danger { padding-bottom: 4px; }
+}
+
+.mml-account {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    &__name { font-weight: 600; }
+}
+
+// Right-hand panel -----------------------------------------------------------------
+
+.mml-rhs-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.mml-panel {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    background: $bg;
+    color: $fg;
+
+    &--center { align-items: center; justify-content: center; padding: 24px; }
+
+    &__title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 16px 10px;
+        font-size: 16px;
+        font-weight: 600;
+    }
+
+    &__scroll {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 0 12px 16px;
+    }
+
+    &__footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px 16px;
+        border-top: 1px solid fg(0.08);
+        font-size: 12px;
+    }
+}
+
+.mml-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 12px 6px;
+
+    &__nav, &__actions { display: flex; align-items: center; gap: 2px; }
+}
+
+.mml-connect {
+    align-items: center;
+    justify-content: center;
+    padding: 32px 24px;
+    text-align: center;
+
+    h3 { margin: 16px 0 8px; font-size: 20px; font-weight: 600; }
+    .mml-benefits { margin: 8px 0 24px; text-align: left; }
+
+    &__art {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 88px;
+        height: 88px;
+        border-radius: 24px;
+        background: accent(0.1);
+        color: $accent;
+    }
+
+    &__button { width: 100%; max-width: 280px; margin-bottom: 12px; }
+}
+
+.mml-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 40px 16px;
+    text-align: center;
+
+    &__art {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 64px;
+        height: 64px;
+        margin-bottom: 8px;
+        border-radius: 50%;
+        background: rgba($warning-rgb, 0.16);
+        color: rgb($warning-rgb);
+    }
+
+    &__title { font-size: 16px; font-weight: 600; }
+}
+
+@media (max-width: 640px) {
+    .mml-overlay { padding: 0; align-items: flex-end; }
+    .mml-modal { max-height: 100vh; border-radius: 12px 12px 0 0; }
+    .mml-modal__body, .mml-modal__footer { padding-left: 16px; padding-right: 16px; }
+    .mml-stepper__label { display: none; }
+    .mml-wizard__footer { flex-direction: column-reverse; align-items: stretch; }
+    .mml-wizard__buttons { justify-content: flex-end; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mml-overlay, .mml-callout, .mml-wizard__body, .mml-done__check, .mml-skeleton {
+        animation: none !important;
+    }
+}
+
+.mml-gap { margin-left: 6px; }
+
+// Icon behaviour ---------------------------------------------------------------
+
+.mml-choice {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+
+    &__item {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 12px 14px;
+        border: none;
+        border-radius: 8px;
+        box-shadow: inset 0 0 0 1px fg(0.16);
+        background: $bg;
+        color: $fg;
+        text-align: left;
+        cursor: pointer;
+
+        &:hover { box-shadow: inset 0 0 0 1px fg(0.4); }
+        &:focus-visible { @extend %focus; }
+
+        &--on {
+            background: accent(0.06);
+            box-shadow: inset 0 0 0 2px $accent !important;
+        }
+    }
+
+    &__radio {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        flex: none;
+        margin-top: 1px;
+        border-radius: 50%;
+        box-shadow: inset 0 0 0 2px fg(0.32);
+        color: $accent-fg;
+    }
+
+    &__item--on &__radio { background: $accent; box-shadow: none; }
+
+    &__text { display: flex; flex-direction: column; gap: 2px; }
+    &__title { font-weight: 600; font-size: 14px; }
+    &__desc { font-size: 12px; line-height: 16px; color: fg(0.64); }
+}
+
+.mml-icon-settings__url {
+    margin: 16px 0 0;
+
+    .mml-chips { margin: 0 0 4px; }
+}
+
+.mml-connect__alt {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid fg(0.08);
+}
+
+// Participants ------------------------------------------------------------------
+
+// Event editor --------------------------------------------------------------------
+
+.mml-select--wide { width: 100%; height: 40px; }
+
+.mml-textarea {
+    height: auto;
+    min-height: 88px;
+    padding: 10px 12px;
+    resize: vertical;
+    line-height: 20px;
+}
+
+.mml-avatar {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    border-radius: 50%;
+    object-fit: cover;
+
+    &--lg { width: 24px; height: 24px; }
+
+    &--mail {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: accent(0.16);
+        color: $accent;
+        font-size: 11px;
+        font-weight: 700;
+    }
+}
+
+.mml-picker {
+    position: relative;
+
+    &__box {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        min-height: 40px;
+        padding: 5px 8px;
+        border-radius: 4px;
+        box-shadow: inset 0 0 0 1px fg(0.16);
+        background: $bg;
+        cursor: text;
+
+        &:focus-within { box-shadow: inset 0 0 0 2px $accent; }
+        &--disabled { opacity: 0.6; }
+    }
+
+    &__chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 4px 0 5px;
+        border-radius: 14px;
+        background: fg(0.08);
+        font-size: 13px;
+
+        button {
+            display: inline-flex;
+            padding: 3px;
+            border: none;
+            border-radius: 50%;
+            background: transparent;
+            color: fg(0.56);
+            cursor: pointer;
+
+            &:hover { background: fg(0.12); color: $fg; }
+        }
+    }
+
+    &__input {
+        flex: 1;
+        min-width: 160px;
+        height: 28px;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: $fg;
+        font-size: 14px;
+    }
+
+    &__menu {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        right: 0;
+        z-index: 10;
+        max-height: 260px;
+        overflow-y: auto;
+        margin: 0;
+        padding: 4px 0;
+        border-radius: 6px;
+        background: $bg;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24), 0 0 0 1px fg(0.12);
+        list-style: none;
+
+        li {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+    }
+
+    &__option--active { background: accent(0.08); }
+    &__name { font-weight: 600; }
+    &__email { margin-left: auto; }
+}
+
+.mml-icon-btn--accent {
+    color: $accent;
+    &:hover:not(:disabled) { background: accent(0.12); color: $accent; }
+}
+
+// System Console: updates --------------------------------------------------------
+
+.mml-update {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-width: 640px;
+    color: $fg;
+
+    &__row { display: flex; align-items: center; gap: 12px; }
+
+    &__card {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 16px;
+        border-radius: 8px;
+        box-shadow: inset 0 0 0 1px accent(0.4);
+        background: accent(0.04);
+    }
+
+    &__title { font-size: 15px; font-weight: 600; }
+
+    &__notes {
+        max-height: 240px;
+        overflow-y: auto;
+        font-size: 13px;
+        line-height: 19px;
+
+        ul { margin: 0 0 8px; padding-left: 20px; }
+        p { margin: 0 0 8px; }
+    }
+
+    &__heading { margin: 4px 0; font-weight: 600; }
+
+    &__steps {
+        margin: 0;
+        padding-left: 20px;
+        font-size: 13px;
+        line-height: 20px;
+
+        li { margin-bottom: 4px; }
+    }
+
+    &__ok {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        color: rgb($success-rgb);
+        font-weight: 600;
+    }
+}
+
+// Answer to an invitation ------------------------------------------------------
+
+.mml-error-text { width: 100%; color: rgb($error-rgb); }
+
+// Mail -------------------------------------------------------------------------
+
+.mml-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 9px;
+    background: $accent;
+    color: $accent-fg;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 18px;
+
+    &--soft { background: accent(0.12); color: $accent; }
+}
+
+.mml-icon-btn--danger:hover:not(:disabled) { background: rgba($error-rgb, 0.1); color: rgb($error-rgb); }
+
+.mml-error-card--compact { margin: 0; padding: 10px 12px; }
+
+.mml-field--spaced { margin-top: 16px; }
+
+.mml-mailbox, .mml-panel--reader { min-height: 0; }
+
+.mml-mail-toolbar {
+    padding: 8px 8px 8px 12px;
+    border-bottom: 1px solid fg(0.08);
+
+    &__actions { gap: 2px; }
+}
+
+.mml-folder-picker {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 55%;
+    height: 32px;
+    padding: 0 8px;
+    border-radius: 4px;
+    color: $fg;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover { background: fg(0.08); }
+    &:focus-within { @extend %focus; }
+    &--loading { color: fg(0.56); cursor: default; }
+
+    &__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    &::after {
+        content: '';
+        flex: none;
+        width: 6px;
+        height: 6px;
+        margin-left: 2px;
+        border-right: 2px solid fg(0.56);
+        border-bottom: 2px solid fg(0.56);
+        transform: translateY(-2px) rotate(45deg);
+    }
+
+    select {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        opacity: 0;
+        cursor: pointer;
+    }
+}
+
+.mml-search {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 8px 12px 0;
+    padding: 0 4px 0 10px;
+    border: 1px solid fg(0.16);
+    border-radius: 4px;
+    color: fg(0.56);
+
+    &:focus-within { border-color: $accent; box-shadow: inset 0 0 0 1px $accent; }
+
+    &__input {
+        flex: 1;
+        min-width: 0;
+        height: 32px;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: $fg;
+        font-size: 14px;
+    }
+}
+
+.mml-mail-notice {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 12px 0;
+}
+
+.mml-mail-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 8px;
+
+    &__note { padding: 8px 16px 0; }
+}
+
+.mml-messages {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.mml-message {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+    border-bottom: 1px solid fg(0.06);
+
+    &:hover, &:focus-within { background: fg(0.04); }
+
+    &__main {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 12px 10px 14px;
+        border: none;
+        background: transparent;
+        color: inherit;
+        text-align: left;
+        cursor: pointer;
+
+        &:focus-visible { @extend %focus; }
+    }
+
+    &__avatar {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        color: #fff;
+        font-size: 12px;
+        font-weight: 700;
+
+        &--lg { width: 40px; height: 40px; font-size: 14px; }
+    }
+
+    &__body {
+        display: flex;
+        flex: 1;
+        min-width: 0;
+        flex-direction: column;
+        gap: 2px;
+    }
+
+    &__top {
+        display: flex;
+        align-items: baseline;
+        gap: 8px;
+    }
+
+    &__from { flex: 1; min-width: 0; font-size: 14px; color: fg(0.8); }
+
+    &__date { flex: none; font-size: 12px; color: fg(0.56); }
+
+    &__subject {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 13px;
+        color: fg(0.64);
+    }
+
+    &__answered { display: inline-flex; flex: none; color: fg(0.48); }
+
+    &__marks {
+        display: flex;
+        flex: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        color: fg(0.48);
+    }
+
+    &__star { color: #f5a623 !important; }
+
+    &__actions {
+        position: absolute;
+        top: 50%;
+        right: 8px;
+        display: none;
+        gap: 2px;
+        padding: 2px;
+        border-radius: 6px;
+        background: $bg;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.16);
+        transform: translateY(-50%);
+    }
+
+    &:hover &__actions, &:focus-within &__actions { display: flex; }
+
+    &--unseen {
+        &::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 4px;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: $accent;
+            transform: translateY(-50%);
+        }
+
+        .mml-message__from { color: $fg; font-weight: 700; }
+        .mml-message__subject { color: $fg; font-weight: 600; }
+    }
+
+    &--skeleton {
+        align-items: center;
+        gap: 10px;
+        padding: 12px 14px;
+    }
+}
+
+.mml-skeleton {
+    display: block;
+    height: 11px;
+    border-radius: 4px;
+    background: linear-gradient(90deg, fg(0.06) 0, fg(0.12) 40px, fg(0.06) 80px);
+    background-size: 400px 100%;
+    animation: mml-shimmer 1.2s linear infinite;
+
+    &--circle { flex: none; width: 32px; height: 32px; border-radius: 50%; }
+    & + & { margin-top: 6px; }
+}
+
+.mml-mail-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 16px;
+    border-top: 1px solid fg(0.08);
+
+    .mml-link { display: inline-flex; align-items: center; gap: 4px; }
+}
+
+// Reader -----------------------------------------------------------------------
+
+.mml-reader {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+
+    &__toolbar {
+        padding: 6px 8px;
+        border-bottom: 1px solid fg(0.08);
+    }
+
+    &__folder { flex: 1; min-width: 0; font-size: 13px; color: fg(0.64); }
+
+    &__scroll {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 12px 16px 24px;
+    }
+
+    &__subject {
+        margin: 0 0 12px;
+        font-size: 18px;
+        font-weight: 600;
+        line-height: 24px;
+        overflow-wrap: anywhere;
+    }
+
+    &__head {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    &__people { flex: 1; min-width: 0; }
+
+    &__from { font-size: 14px; overflow-wrap: anywhere; }
+
+    &__to {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        max-width: 100%;
+        padding: 0;
+        border: none;
+        background: none;
+        font-size: 12px;
+        cursor: pointer;
+
+        &:hover { color: $fg; }
+    }
+
+    &__details {
+        display: grid;
+        grid-template-columns: auto 1fr;
+        gap: 2px 10px;
+        margin: 8px 0 0;
+        padding: 8px 10px;
+        border-radius: 6px;
+        background: fg(0.04);
+        font-size: 12px;
+
+        dt { color: fg(0.56); }
+        dd { margin: 0; overflow-wrap: anywhere; }
+    }
+
+    &__date { flex: none; white-space: nowrap; }
+
+    &__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 14px 0 12px;
+    }
+
+    &__text {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        font-size: 14px;
+        line-height: 1.5;
+    }
+
+    &__frame {
+        display: block;
+        width: 100%;
+        border: none;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: inset 0 0 0 1px fg(0.08);
+    }
+}
+
+.mml-images-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    background: rgba($warning-rgb, 0.12);
+    font-size: 12px;
+
+    svg { flex: none; margin-top: 2px; }
+    span { flex: 1; }
+    .mml-link { flex: none; font-size: 12px; }
+}
+
+.mml-menu-anchor { position: relative; }
+
+.mml-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 10;
+    min-width: 200px;
+    max-height: 320px;
+    margin: 4px 0 0;
+    padding: 4px 0;
+    overflow-y: auto;
+    border-radius: 6px;
+    background: $bg;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16), 0 0 0 1px fg(0.08);
+    list-style: none;
+
+    button {
+        display: block;
+        width: 100%;
+        padding: 6px 14px;
+        border: none;
+        background: none;
+        color: $fg;
+        font-size: 14px;
+        text-align: left;
+        white-space: nowrap;
+        cursor: pointer;
+
+        &:hover, &:focus-visible { background: fg(0.08); outline: none; }
+    }
+}
+
+.mml-attachments {
+    margin-top: 16px;
+
+    &__title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 8px;
+        font-size: 13px;
+        font-weight: 600;
+        color: fg(0.72);
+    }
+
+    ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
+}
+
+.mml-attachment {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    box-shadow: inset 0 0 0 1px fg(0.12);
+    color: $fg !important;
+    text-decoration: none !important;
+
+    &:hover { background: fg(0.04); box-shadow: inset 0 0 0 1px accent(0.48); }
+
+    &__ext {
+        display: inline-flex;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        height: 30px;
+        border-radius: 4px;
+        background: accent(0.12);
+        color: $accent;
+        font-size: 10px;
+        font-weight: 700;
+    }
+
+    &__text { display: flex; flex: 1; min-width: 0; flex-direction: column; }
+
+    &__name { font-size: 13px; }
+
+    svg { flex: none; color: fg(0.56); }
+}
+
+// Composer ---------------------------------------------------------------------
+
+.mml-composer {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-radius: 6px;
+
+    &--drag { box-shadow: 0 0 0 2px $accent; background: accent(0.04); }
+
+    &__row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+
+        > .mml-picker { flex: 1; min-width: 0; }
+        > .mml-link { flex: none; }
+    }
+
+    &__label {
+        flex: none;
+        width: 64px;
+        font-size: 13px;
+        color: fg(0.64);
+    }
+
+    &__subject { flex: 1; }
+
+    &__text {
+        min-height: 240px;
+        margin-top: 4px;
+        font-family: inherit;
+        line-height: 1.5;
+        resize: vertical;
+    }
+
+    &__files {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+
+        > .mml-link { display: inline-flex; align-items: center; gap: 4px; }
+    }
+}
+
+.mml-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    height: 30px;
+    padding: 0 4px 0 10px;
+    border-radius: 15px;
+    background: fg(0.06);
+    font-size: 13px;
+
+    input { margin: 0; }
+    .mml-icon-btn { width: 22px; height: 22px; border-radius: 50%; }
+    &--off { opacity: 0.56; text-decoration: line-through; }
+}
+
+.mml-server-row {
+    display: flex;
+    gap: 6px;
+
+    &__host { flex: 1; min-width: 0; }
+    &__port { width: 84px; flex: none; }
+    &__security { width: 172px; flex: none; }
+}
+
+.mml-servers { margin: -4px 0 12px; }
+
+.mml-share-preview {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-left: 3px solid $accent;
+    border-radius: 4px;
+    background: fg(0.04);
+}
+
+@media (max-width: 640px) {
+    .mml-server-row { flex-wrap: wrap; }
+    .mml-server-row__host { flex-basis: 100%; }
+    .mml-composer__label { width: 52px; }
+}

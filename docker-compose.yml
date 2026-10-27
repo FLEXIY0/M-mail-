@@ -42,6 +42,25 @@ services:
       - mm-client-plugins:/mattermost/client/plugins
       - mm-socket:/var/tmp
 
+  # Test mail server for plugin development: IMAP and SMTP with local
+  # delivery between its mailboxes. Not for production use.
+  greenmail:
+    image: greenmail/standalone:2.1.3
+    restart: unless-stopped
+    environment:
+      GREENMAIL_OPTS: >-
+        -Dgreenmail.setup.test.all
+        -Dgreenmail.hostname=0.0.0.0
+        -Dgreenmail.auth.disabled=false
+        -Dgreenmail.users.login=email
+        -Dgreenmail.users=ivan:app-password@example.ru,anna:app-password@example.ru,boss:app-password@example.ru
+        -Dgreenmail.verbose=false
+    ports:
+      - "3025:3025"   # SMTP
+      - "3143:3143"   # IMAP
+      - "3465:3465"   # SMTPS (self-signed)
+      - "3993:3993"   # IMAPS (self-signed)
+
 volumes:
   postgres-data:
   mm-config:

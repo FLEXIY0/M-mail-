@@ -1,0 +1,242 @@
+import React from 'react';
+
+import {CloseIcon, Spinner} from './icons';
+
+import {api} from '../api';
+import type {MattermostUser} from '../types';
+
+// A recipient chosen in the composer: a Mattermost user (their e-mail is
+// resolved on the server) or a plain e-mail address.
+export interface Participant {
+    key: string;
+    userId?: string;
+    email?: string;
+    label: string;
+    sublabel?: string;
+}
+
+const EMAIL_RE = /^[^\s@<>(),;:]+@[^\s@<>(),;:]+\.[^\s@<>(),;:]+$/;
+
+export function isEmail(value: string) {
+    return EMAIL_RE.test(value.trim());
+}
+
+export function participantFromUser(u: MattermostUser): Participant {
+    return {key: `u:${u.id}`, userId: u.id, label: u.display_name || u.username, sublabel: `@${u.username}`};
+}
+
+export function participantFromEmail(email: string, name = ''): Participant {
+    const clean = email.trim().toLowerCase();
+    return {key: `e:${clean}`, email: clean, label: name || clean, sublabel: name ? clean : undefined};
+}
+
+function avatarUrl(userId: string) {
+    return `${window.basename || ''}/api/v4/users/${userId}/image`;
+}
+
+export default function RecipientPicker({value, onChange, disabled, autoFocus, placeholder = 'Имя коллеги или адрес почты'}: {
+    value: Participant[];
+    onChange: (v: Participant[]) => void;
+    disabled?: boolean;
+    autoFocus?: boolean;
+    placeholder?: string;
+}) {
+    const [text, setText] = React.useState('');
+    const [results, setResults] = React.useState<MattermostUser[]>([]);
+    const [searching, setSearching] = React.useState(false);
+    const [active, setActive] = React.useState(0);
+    const [open, setOpen] = React.useState(false);
+    const inputRef = React.useRef<HTMLInputElement>(null);
+
+    React.useEffect(() => {
+        if (autoFocus) {
+            inputRef.current?.focus();
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    React.useEffect(() => {
+        const term = text.trim();
+        if (term.length < 2 || isEmail(term)) {
+            setResults([]);
+            setSearching(false);
+            return undefined;
+        }
+        setSearching(true);
+        const timer = window.setTimeout(() => {
+            api.searchUsers(term).
+                then((res) => {
+                    setResults(res.users);
+                    setActive(0);
+                }).
+                catch(() => setResults([])).
+                finally(() => setSearching(false));
+        }, 250);
+        return () => window.clearTimeout(timer);
+    }, [text]);
+
+    const add = (p: Participant) => {
+        if (!value.some((v) => v.key === p.key)) {
+            onChange([...value, p]);
+        }
+        setText('');
+        setResults([]);
+        inputRef.current?.focus();
+    };
+
+    const remove = (key: string) => onChange(value.filter((v) => v.key !== key));
+
+    // Several addresses can be pasted at once, e.g. from an e-mail.
+    const addEmails = (raw: string) => {
+        const emails = raw.split(/[\s,;]+/).map((s) => s.replace(/^<|>$/g, '')).filter(isEmail);
+        if (emails.length === 0) {
+            return false;
+        }
+        const next = [...value];
+        for (const e of emails) {
+            const p = participantFromEmail(e);
+            if (!next.some((v) => v.key === p.key)) {
+                next.push(p);
+            }
+        }
+        onChange(next);
+        setText('');
+        setResults([]);
+        return true;
+    };
+
+    const suggestions = results.filter((u) => !value.some((v) => v.userId === u.id));
+    const typedEmail = isEmail(text) ? text.trim() : '';
+
+    const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            setActive((a) => Math.min(a + 1, Math.max(suggestions.length - 1, 0)));
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            setActive((a) => Math.max(a - 1, 0));
+        } else if (e.key === 'Enter' || e.key === ',' || e.key === ';') {
+            if (suggestions[active] && e.key === 'Enter') {
+                e.preventDefault();
+                add(participantFromUser(suggestions[active]));
+            } else if (text.trim() && addEmails(text)) {
+                e.preventDefault();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+            }
+        } else if (e.key === 'Backspace' && text === '' && value.length > 0) {
+            remove(value[value.length - 1].key);
+        }
+    };
+
+    return (
+        <div className='mml-picker'>
+            <div
+                className={`mml-picker__box ${disabled ? 'mml-picker__box--disabled' : ''}`}
+                onClick={() => inputRef.current?.focus()}
+            >
+                {value.map((p) => (
+                    <span
+                        key={p.key}
+                        className='mml-picker__chip'
+                        title={p.sublabel || p.email}
+                    >
+                        {p.userId ? (
+                            <img
+                                className='mml-avatar'
+                                src={avatarUrl(p.userId)}
+                                alt=''
+                            />
+                        ) : <span className='mml-avatar mml-avatar--mail'>{'@'}</span>}
+                        {p.label}
+                        <button
+                            type='button'
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                remove(p.key);
+                            }}
+                            aria-label={`Убрать ${p.label}`}
+                        >
+                            <CloseIcon size={12}/>
+                        </button>
+                    </span>
+                ))}
+                <input
+                    ref={inputRef}
+                    className='mml-picker__input'
+                    value={text}
+                    disabled={disabled}
+                    placeholder={value.length ? '' : placeholder}
+                    onChange={(e) => {
+                        setText(e.target.value);
+                        setOpen(true);
+                    }}
+                    onFocus={() => setOpen(true)}
+                    onBlur={() => {
+                        // An address typed without Enter is not lost.
+                        if (isEmail(text)) {
+                            addEmails(text);
+                        }
+                        window.setTimeout(() => setOpen(false), 150);
+                    }}
+                    onKeyDown={onKeyDown}
+                    onPaste={(e) => {
+                        const pasted = e.clipboardData.getData('text');
+                        if ((/[,;\s]/).test(pasted.trim()) && addEmails(pasted)) {
+                            e.preventDefault();
+                        }
+                    }}
+                />
+                {searching && <Spinner size={14}/>}
+            </div>
+            {open && (suggestions.length > 0 || typedEmail) && (
+                <ul
+                    className='mml-picker__menu'
+                    role='listbox'
+                >
+                    {suggestions.map((u, i) => (
+                        <li
+                            key={u.id}
+                            role='option'
+                            aria-selected={i === active}
+                            className={i === active ? 'mml-picker__option--active' : ''}
+                            onMouseDown={(e) => {
+                                e.preventDefault();
+                                add(participantFromUser(u));
+                            }}
+                            onMouseEnter={() => setActive(i)}
+                        >
+                            <img
+                                className='mml-avatar mml-avatar--lg'
+                                src={avatarUrl(u.id)}
+                                alt=''
+                            />
+                            <span className='mml-picker__name'>{u.display_name}</span>
+                            <span className='mml-muted'>{`@${u.username}`}</span>
+                            {u.email && <span className='mml-muted mml-small mml-picker__email'>{u.email}</span>}
+                        </li>
+                    ))}
+                    {typedEmail && !suggestions.some((u) => u.email === typedEmail.toLowerCase()) && (
+                        <li
+                            role='option'
+                            aria-selected={suggestions.length === 0}
+                            className={suggestions.length === 0 ? 'mml-picker__option--active' : ''}
+                            onMouseDown={(e) => {
+                                e.preventDefault();
+                                addEmails(typedEmail);
+                            }}
+                        >
+                            <span className='mml-avatar mml-avatar--lg mml-avatar--mail'>{'@'}</span>
+                            <span>{'Добавить '}<strong>{typedEmail}</strong></span>
+                        </li>
+                    )}
+                </ul>
+            )}
+        </div>
+    );
+}
+
+// pendingText lets the composer add an address that was typed but not
+// confirmed with Enter before "Send" was pressed.
+export function parseAddresses(raw: string): Participant[] {
+    return raw.split(/[\s,;]+/).map((s) => s.replace(/^<|>$/g, '')).filter(isEmail).map((e) => participantFromEmail(e));
+}

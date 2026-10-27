@@ -1,0 +1,10 @@
+dist/
+bin/
+build/bin/
+server/dist/
+server/coverage.txt
+webapp/dist/
+webapp/node_modules/
+webapp/junit.xml
+webapp/.eslintcache
+.DS_Store

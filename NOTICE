@@ -1,0 +1,16 @@
+Mattermost Mail plugin (VK WorkSpace, Mail.ru, Yandex, IMAP)
+Copyright 2026 The M-mail- contributors
+
+The plugin structure, the connection wizard, the encryption of app passwords
+and the update checker come from mattermost-plugin-mailru-calendar
+(https://github.com/FLEXIY0/mattermost-plugin-mailru-calendar),
+licensed under the Apache License, Version 2.0, which in turn is derived from
+mattermost-yandex-calendar-plugin (https://github.com/LugaMuga/mattermost-yandex-calendar-plugin),
+Copyright Alex Yolkin, licensed under the Apache License, Version 2.0.
+
+The build tooling (Makefile, build/) comes from the Mattermost plugin
+starter template (https://github.com/mattermost/mattermost-plugin-starter-template),
+Copyright Mattermost, Inc., licensed under the Apache License, Version 2.0.
+
+IMAP, SMTP and MIME support: go-imap, go-smtp, go-message and go-sasl by
+Simon Ser and contributors (MIT License).
