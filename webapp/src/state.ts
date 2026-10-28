@@ -31,6 +31,7 @@ export type Route =
     | {name: 'wizard'; mode: WizardMode}
     | {name: 'share'; ref: MessageRef}
     | {name: 'rules'}
+    | {name: 'signature'}
     | {name: 'rule'; rule: SortRuleDraft};
 
 // SortRuleDraft opens the rule editor: a new rule, prefilled e.g. with the
@@ -282,4 +283,13 @@ export function openRule(rule: SortRuleDraft = {}) {
 
 export function closeRule() {
     popWhile(['rule']);
+}
+
+// openSignature opens the signature editor on top of the settings.
+export function openSignature() {
+    pushRoute({name: 'signature'});
+}
+
+export function closeSignature() {
+    popWhile(['signature']);
 }

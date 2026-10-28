@@ -29,6 +29,9 @@ export interface Settings {
     signature: string;
     signature_image?: boolean;
     signature_layout?: 'left' | 'above';
+    signature_html?: string;
+    signature_logo?: boolean;
+    signature_logo_height?: number;
 }
 
 export interface PluginConfig {
@@ -40,6 +43,10 @@ export interface PluginConfig {
     default_settings: Settings;
     bot_username: string;
     max_attachment_bytes: number;
+    require_signature: boolean;
+
+    // The job title from the Mattermost profile, for the signature template.
+    position?: string;
 }
 
 export type WizardMode = 'connect' | 'reconnect' | 'settings' | 'icon';
@@ -175,6 +182,7 @@ export interface SendRequest {
     attachments: OutgoingFile[];
     mattermost_files?: string[];
     signature_image?: boolean;
+    signature_logo?: boolean;
     draft_of?: MessageRef;
 }
 

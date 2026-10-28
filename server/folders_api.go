@@ -202,9 +202,17 @@ func (p *Plugin) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GET /signature-image
+// imageKind reads "photo" (the default) or "logo".
+func imageKind(kind string) string {
+	if kind == store.ImageLogo {
+		return store.ImageLogo
+	}
+	return store.ImagePhoto
+}
+
+// GET /signature-image?kind=photo|logo
 func (p *Plugin) handleGetSignatureImage(w http.ResponseWriter, r *http.Request) {
-	img, err := p.store.GetSignatureImage(userIDFrom(r))
+	img, err := p.store.GetSignatureImage(userIDFrom(r), imageKind(r.URL.Query().Get("kind")))
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, "")
 		return
@@ -248,11 +256,12 @@ func decodeImageDataURL(raw string) (*store.SignatureImage, error) {
 	return &store.SignatureImage{ContentType: contentType, Data: data}, nil
 }
 
-// PUT /signature-image {data_url}
+// PUT /signature-image {data_url, kind}
 func (p *Plugin) handlePutSignatureImage(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
 	var req struct {
 		DataURL string `json:"data_url"`
+		Kind    string `json:"kind"`
 	}
 	if err := decodeLimited(r, &req, signatureBodyLimit); err != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidMessage, "картинка больше 300 КБ")
@@ -263,24 +272,33 @@ func (p *Plugin) handlePutSignatureImage(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, codeInvalidMessage, err.Error())
 		return
 	}
-	p.setSignatureImage(w, userID, img)
+	p.setSignatureImage(w, userID, imageKind(req.Kind), img)
 }
 
-// POST /signature-image/delete
+// POST /signature-image/delete {kind}
 func (p *Plugin) handleDeleteSignatureImage(w http.ResponseWriter, r *http.Request) {
-	p.setSignatureImage(w, userIDFrom(r), nil)
+	var req struct {
+		Kind string `json:"kind"`
+	}
+	// An empty body means the photo, as before logos existed.
+	_ = decodeBody(r, &req)
+	p.setSignatureImage(w, userIDFrom(r), imageKind(req.Kind), nil)
 }
 
-func (p *Plugin) setSignatureImage(w http.ResponseWriter, userID string, img *store.SignatureImage) {
+func (p *Plugin) setSignatureImage(w http.ResponseWriter, userID, kind string, img *store.SignatureImage) {
 	account := p.accountFor(w, userID)
 	if account == nil {
 		return
 	}
-	if err := p.store.SaveSignatureImage(userID, img); err != nil {
+	if err := p.store.SaveSignatureImage(userID, kind, img); err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, "")
 		return
 	}
-	account.Settings.SignatureImage = img != nil
+	if kind == store.ImageLogo {
+		account.Settings.SignatureLogo = img != nil
+	} else {
+		account.Settings.SignatureImage = img != nil
+	}
 	if err := p.store.SaveAccount(userID, account); err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, "")
 		return

@@ -36,13 +36,20 @@ type configuration struct {
 	CheckIntervalMinutes int
 	MaxAttachmentMB      int
 	HelpText             string
-	EncryptionKey        string
+	// RequireSignature is a pointer so that "never saved" means the
+	// default (required), not false.
+	RequireSignature *bool
+	EncryptionKey    string
 
 	// UpdateSource is "owner/repo" on GitHub (or a release API URL).
 	UpdateSource string
 	// NotifyAdminsAboutUpdates is a pointer so that "never saved" means
 	// the default (on), not false.
 	NotifyAdminsAboutUpdates *bool
+}
+
+func (c *configuration) requireSignature() bool {
+	return c.RequireSignature == nil || *c.RequireSignature
 }
 
 func (c *configuration) notifyAdminsAboutUpdates() bool {

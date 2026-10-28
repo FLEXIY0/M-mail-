@@ -13,6 +13,7 @@ import {RuleEditor, RulesPage} from './Rules';
 import SettingsDialog from './SettingsDialog';
 import {ErrorCard} from './shared';
 import ShareDialog from './ShareDialog';
+import SignatureEditor from './SignatureEditor';
 import {Button, Callout} from './ui';
 import WizardRoot from './Wizard';
 
@@ -155,6 +156,8 @@ function RouteScreen({route, me}: {route: Route; me: Me}) {
         return <ShareDialog msgRef={route.ref}/>;
     case 'rules':
         return <RulesPage/>;
+    case 'signature':
+        return <SignatureEditor/>;
     case 'rule':
         return <RuleEditor draft={route.rule}/>;
     case 'message':

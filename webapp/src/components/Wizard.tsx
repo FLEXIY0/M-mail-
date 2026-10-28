@@ -90,7 +90,14 @@ function Wizard({mode, config, me}: {mode: WizardMode; config: PluginConfig; me:
     const [phase, setPhase] = React.useState<CheckPhase>('idle');
     const [error, setError] = React.useState<ApiError | null>(null);
     const [checked, setChecked] = React.useState<CheckResult | null>(null);
-    const [settings, setSettings] = React.useState<Settings>(() => ({...(me.settings || config.default_settings)}));
+    const [settings, setSettings] = React.useState<Settings>(() => {
+        const s = {...(me.settings || config.default_settings)};
+        if (!s.signature.trim()) {
+            // A signature to start from: the administrator may require one.
+            s.signature = ['С уважением,', me.display_name || config.display_name, config.position].filter(Boolean).join('\n');
+        }
+        return s;
+    });
     const [displayName, setDisplayName] = React.useState(me.display_name || config.display_name);
     const [saving, setSaving] = React.useState(false);
     const [saveError, setSaveError] = React.useState<ApiError | null>(null);
@@ -288,6 +295,7 @@ function Wizard({mode, config, me}: {mode: WizardMode; config: PluginConfig; me:
                     onDisplayName={setDisplayName}
                     email={username.includes('@') ? username : config.email}
                     botUsername={config.bot_username}
+                    required={config.require_signature}
                 />
                 {saveError && (
                     <ErrorCard

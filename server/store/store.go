@@ -24,6 +24,7 @@ const (
 	syncPrefix    = "s:"
 	prefsPrefix   = "p:"
 	imagePrefix   = "i:"
+	logoPrefix    = "l:"
 	rulesPrefix   = "r:"
 	listPageSize  = 1000
 )
@@ -46,6 +47,13 @@ type Settings struct {
 	// of the text or "above" it.
 	SignatureImage  bool   `json:"signature_image"`
 	SignatureLayout string `json:"signature_layout,omitempty"`
+	// SignatureHTML is the signature with formatting (colour, bold, links),
+	// sanitized; Signature then holds its plain text version.
+	SignatureHTML string `json:"signature_html,omitempty"`
+	// SignatureLogo tells that a company logo is stored; it goes under the
+	// text, SignatureLogoHeight pixels high.
+	SignatureLogo       bool `json:"signature_logo"`
+	SignatureLogoHeight int  `json:"signature_logo_height,omitempty"`
 }
 
 // SignatureImage is the picture of the signature, kept apart from the
@@ -158,9 +166,22 @@ func (s *Store) SavePreferences(userID string, prefs *Preferences) error {
 	return errors.Wrap(err, "failed to save preferences")
 }
 
-func (s *Store) GetSignatureImage(userID string) (*SignatureImage, error) {
+// Kinds of signature pictures.
+const (
+	ImagePhoto = "photo"
+	ImageLogo  = "logo"
+)
+
+func imageKey(userID, kind string) string {
+	if kind == ImageLogo {
+		return logoPrefix + userID
+	}
+	return imagePrefix + userID
+}
+
+func (s *Store) GetSignatureImage(userID, kind string) (*SignatureImage, error) {
 	var img SignatureImage
-	if err := s.kv.Get(imagePrefix+userID, &img); err != nil {
+	if err := s.kv.Get(imageKey(userID, kind), &img); err != nil {
 		return nil, errors.Wrap(err, "failed to load signature image")
 	}
 	if len(img.Data) == 0 {
@@ -169,11 +190,11 @@ func (s *Store) GetSignatureImage(userID string) (*SignatureImage, error) {
 	return &img, nil
 }
 
-func (s *Store) SaveSignatureImage(userID string, img *SignatureImage) error {
+func (s *Store) SaveSignatureImage(userID, kind string, img *SignatureImage) error {
 	if img == nil {
-		return errors.Wrap(s.kv.Delete(imagePrefix+userID), "failed to delete signature image")
+		return errors.Wrap(s.kv.Delete(imageKey(userID, kind)), "failed to delete signature image")
 	}
-	_, err := s.kv.Set(imagePrefix+userID, img)
+	_, err := s.kv.Set(imageKey(userID, kind), img)
 	return errors.Wrap(err, "failed to save signature image")
 }
 
@@ -225,7 +246,7 @@ func (s *Store) SaveRules(userID string, rules []Rule) error {
 
 // DeleteUser removes the account and its state. Preferences stay.
 func (s *Store) DeleteUser(userID string) error {
-	for _, prefix := range []string{accountPrefix, syncPrefix, imagePrefix, rulesPrefix} {
+	for _, prefix := range []string{accountPrefix, syncPrefix, imagePrefix, logoPrefix, rulesPrefix} {
 		if err := s.kv.Delete(prefix + userID); err != nil {
 			return errors.Wrap(err, "failed to delete user data")
 		}

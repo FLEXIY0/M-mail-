@@ -372,12 +372,17 @@ type sendRequest struct {
 	// SignatureImage attaches the stored signature picture; the HTML
 	// refers to it as cid:signature@mattermost.
 	SignatureImage bool `json:"signature_image"`
+	// SignatureLogo attaches the company logo as cid:logo@mattermost.
+	SignatureLogo bool `json:"signature_logo"`
 	// DraftOf is the saved draft this message replaces: it is removed
 	// after the message is sent or saved again.
 	DraftOf *messageRef `json:"draft_of,omitempty"`
 }
 
-const signatureContentID = "signature@mattermost"
+const (
+	signatureContentID = "signature@mattermost"
+	logoContentID      = "logo@mattermost"
+)
 
 func (p *Plugin) cleanAddresses(list []recipient) ([]mailclient.Address, error) {
 	out := make([]mailclient.Address, 0, len(list))
@@ -433,13 +438,27 @@ func (p *Plugin) prepareOutgoing(ctx context.Context, w http.ResponseWriter, use
 		writeError(w, http.StatusBadRequest, codeInvalidMessage, err.Error())
 		return nil
 	}
-	if req.SignatureImage && out.HTML != "" {
-		if img, imgErr := p.store.GetSignatureImage(userID); imgErr == nil && img != nil {
+	if out.HTML != "" {
+		for _, pic := range []struct {
+			on         bool
+			kind, cid  string
+			namePrefix string
+		}{
+			{req.SignatureImage, store.ImagePhoto, signatureContentID, "signature"},
+			{req.SignatureLogo, store.ImageLogo, logoContentID, "logo"},
+		} {
+			if !pic.on {
+				continue
+			}
+			img, imgErr := p.store.GetSignatureImage(userID, pic.kind)
+			if imgErr != nil || img == nil {
+				continue
+			}
 			ext := ".png"
 			if exts, _ := mime.ExtensionsByType(img.ContentType); len(exts) > 0 {
 				ext = exts[0]
 			}
-			out.Inline = append(out.Inline, mailclient.InlineImage{ContentID: signatureContentID, ContentType: img.ContentType, Filename: "signature" + ext, Data: img.Data})
+			out.Inline = append(out.Inline, mailclient.InlineImage{ContentID: pic.cid, ContentType: img.ContentType, Filename: pic.namePrefix + ext, Data: img.Data})
 		}
 	}
 

@@ -1,6 +1,7 @@
 import React from 'react';
 
-import {CloseIcon, PaperclipIcon, SendIcon, Spinner, TrashIcon} from './icons';
+import {CloseIcon, PaperclipIcon, PenIcon, SendIcon, Spinner, TrashIcon} from './icons';
+import {SignatureCard} from './MailSettings';
 import {HtmlFrame} from './MessageView';
 import RecipientPicker, {participantFromEmail} from './RecipientPicker';
 import type {Participant} from './RecipientPicker';
@@ -9,11 +10,10 @@ import {Callout, PanelPage} from './ui';
 
 import {ApiError, api} from '../api';
 import {addressFull, formatQuoteDate, formatSize, quoteText, subjectWith} from '../format';
-import {SIGNATURE_CID, fitSize, isPortrait, signatureHTML, useSignatureImage} from '../signature';
-import type {SignatureImageInfo} from '../signature';
-import {closeCompose, hideToast, mailChanged, openCompose, showToast, useStore} from '../state';
+import {LOGO_CID, SIGNATURE_CID, signatureHTML, useSignatureImage} from '../signature';
+import {closeCompose, hideToast, mailChanged, openCompose, openSignature, showToast, useStore} from '../state';
 import type {ComposeRequest} from '../state';
-import type {Address, Attachment, Me, Message, OutgoingFile, Recipient, SendRequest} from '../types';
+import type {Address, Attachment, Me, Message, OutgoingFile, Recipient, SendRequest, Settings} from '../types';
 
 interface LocalFile {
     key: string;
@@ -207,7 +207,7 @@ function buildDraft(req: ComposeRequest, original: Message | null, me: Me): Draf
         draft.bcc = toParticipants(original.bcc || [], new Set());
         draft.showCc = draft.cc.length + draft.bcc.length > 0;
         draft.subject = original.subject;
-        draft.forwardParts = (original.attachments || []).filter((a) => !a.inline && a.content_id !== SIGNATURE_CID).map((a) => a.part);
+        draft.forwardParts = (original.attachments || []).filter((a) => !a.inline && a.content_id !== SIGNATURE_CID && a.content_id !== LOGO_CID).map((a) => a.part);
 
         // The signature at the end goes back into its own block, with the
         // picture; a quote below it stays in the text.
@@ -265,7 +265,9 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
     const [sending, setSending] = React.useState(false);
     const [saving, setSaving] = React.useState(false);
     const [error, setError] = React.useState<ApiError | null>(() => sendErrors.get(id) || null);
-    const sigImage = useSignatureImage(me.settings);
+    const sigImage = useSignatureImage(me.settings, 'photo');
+    const sigLogo = useSignatureImage(me.settings, 'logo');
+    const required = Boolean(useStore((st) => st.config?.require_signature));
     const [dragOver, setDragOver] = React.useState(false);
     const fileInput = React.useRef<HTMLInputElement>(null);
     const textRef = React.useRef<HTMLTextAreaElement>(null);
@@ -343,7 +345,8 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
     const reading = draft.files.some((f) => !f.data);
     const signatureText = (me.settings?.signature || '').trim();
     const layout = me.settings?.signature_layout || 'left';
-    const withSignature = draft.signature && Boolean(signatureText || sigImage);
+    const signatureFormatted = me.settings?.signature_html || '';
+    const withSignature = (draft.signature || (required && request.mode !== 'draft')) && Boolean(signatureText || sigImage || sigLogo);
 
     const forget = () => {
         drafts.delete(id);
@@ -415,13 +418,16 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
         const own = draft.text.replace(/\s+$/, '');
         const sigText = withSignature && signatureText ? `\n\n${signatureText}` : '';
         const sigImg = withSignature && sigImage ? sigImage : null;
+        const logoImg = withSignature && sigLogo ? sigLogo : null;
         const text = own + sigText + (q ? `\n\n${quotedText(q, forward)}` : '');
-        if (!q && !sigImg) {
-            return {text, html: '', image: false};
+
+        // Without a quote, pictures or colours a plain text message is enough.
+        if (!q && !sigImg && !logoImg && !(withSignature && signatureFormatted)) {
+            return {text, html: '', image: false, logo: false};
         }
         let html = `<div>${textToHTML(own)}</div>`;
         if (withSignature) {
-            html += signatureHTML(signatureText, layout, sigImg);
+            html += signatureHTML({text: signatureText, html: signatureFormatted, photo: sigImg, layout, logo: logoImg, logoHeight: me.settings?.signature_logo_height});
         }
         if (q) {
             const quoteHTML = q.html ? quoteHTMLOf(q.html) : textToHTML(q.text);
@@ -429,7 +435,7 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                 `<div>${textToHTML(q.header)}</div>` +
                 (forward ? `<div>${quoteHTML}</div>` : `<blockquote style="margin:0 0 0 .8ex;border-left:2px solid #0077ff;padding-left:1ex">${quoteHTML}</blockquote>`);
         }
-        return {text, html, image: Boolean(sigImg)};
+        return {text, html, image: Boolean(sigImg), logo: Boolean(logoImg)};
     };
 
     const buildRequest = (): SendRequest => {
@@ -443,6 +449,7 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
             text: body.text,
             html: body.html || undefined,
             signature_image: body.image || undefined,
+            signature_logo: body.logo || undefined,
             attachments,
             mattermost_files: draft.mmFiles.map((f) => f.id),
         };
@@ -688,10 +695,8 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
 
                 {withSignature && (
                     <SignatureBlock
-                        text={signatureText}
-                        image={sigImage}
-                        layout={layout}
-                        onRemove={() => update({signature: false})}
+                        settings={me.settings}
+                        onRemove={required ? undefined : () => update({signature: false})}
                     />
                 )}
 
@@ -743,29 +748,34 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
     );
 }
 
-function SignatureBlock({text, image, layout, onRemove}: {text: string; image: SignatureImageInfo | null; layout: 'left' | 'above'; onRemove: () => void}) {
-    const size = image && fitSize(image, layout);
+function SignatureBlock({settings, onRemove}: {settings?: Settings; onRemove?: () => void}) {
+    if (!settings) {
+        return null;
+    }
     return (
         <div className='mml-composer__signature'>
-            <div className={`mml-sig-preview mml-sig-preview--${layout}`}>
-                {image && size && (
-                    <img
-                        src={image.url}
-                        alt=''
-                        style={{width: size.width, height: size.height, borderRadius: isPortrait(image, layout) ? '50%' : 6}}
-                    />
-                )}
-                {text && <span className='mml-sig-preview__text'>{text}</span>}
-            </div>
-            <button
-                type='button'
-                className='mml-icon-btn'
-                title='Убрать подпись из этого письма'
-                aria-label='Убрать подпись'
-                onClick={onRemove}
-            >
-                <CloseIcon size={14}/>
-            </button>
+            <SignatureCard settings={settings}/>
+            {onRemove ? (
+                <button
+                    type='button'
+                    className='mml-icon-btn'
+                    title='Убрать подпись из этого письма'
+                    aria-label='Убрать подпись'
+                    onClick={onRemove}
+                >
+                    <CloseIcon size={14}/>
+                </button>
+            ) : (
+                <button
+                    type='button'
+                    className='mml-icon-btn'
+                    title='Изменить подпись'
+                    aria-label='Изменить подпись'
+                    onClick={openSignature}
+                >
+                    <PenIcon size={14}/>
+                </button>
+            )}
         </div>
     );
 }

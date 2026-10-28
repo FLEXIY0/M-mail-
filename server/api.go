@@ -121,10 +121,11 @@ func decodeLimited(r *http.Request, v any, limit int64) error {
 // GET /config — everything the wizard needs before the user connects.
 func (p *Plugin) handleConfig(w http.ResponseWriter, r *http.Request) {
 	userID := userIDFrom(r)
-	email, name := "", ""
+	email, name, position := "", "", ""
 	if user, err := p.client.User.Get(userID); err == nil {
 		email = user.Email
 		name = strings.TrimSpace(user.FirstName + " " + user.LastName)
+		position = user.Position
 	}
 	cfg := p.getConfiguration()
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -136,6 +137,8 @@ func (p *Plugin) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"default_settings":     store.DefaultSettings(),
 		"bot_username":         botUsername,
 		"max_attachment_bytes": cfg.maxAttachmentBytes(),
+		"require_signature":    cfg.requireSignature(),
+		"position":             position,
 	})
 }
 
@@ -363,11 +366,49 @@ func sanitizeSettings(in store.Settings) store.Settings {
 	if out.SignatureLayout != "above" {
 		out.SignatureLayout = "left"
 	}
-	out.Signature = strings.TrimSpace(strings.ReplaceAll(in.Signature, "\r\n", "\n"))
+	out.SignatureHTML = sanitizeSignatureHTML(in.SignatureHTML)
+	if out.SignatureHTML != "" {
+		// The plain text version always matches the formatted one.
+		out.Signature = mailclient.HTMLToText(out.SignatureHTML)
+	}
+	out.Signature = strings.TrimSpace(strings.ReplaceAll(out.Signature, "\r\n", "\n"))
 	if utf8.RuneCountInString(out.Signature) > maxSignature {
 		out.Signature = string([]rune(out.Signature)[:maxSignature])
 	}
+	if out.Signature == "" {
+		out.SignatureHTML = ""
+	}
+	switch {
+	case out.SignatureLogoHeight == 0:
+		out.SignatureLogoHeight = defaultLogoHeight
+	case out.SignatureLogoHeight < minLogoHeight:
+		out.SignatureLogoHeight = minLogoHeight
+	case out.SignatureLogoHeight > maxLogoHeight:
+		out.SignatureLogoHeight = maxLogoHeight
+	}
 	return out
+}
+
+const (
+	minLogoHeight     = 24
+	defaultLogoHeight = 48
+	maxLogoHeight     = 120
+	codeNoSignature   = "signature_required"
+)
+
+func init() {
+	errorMessages[codeNoSignature] = "Заполните подпись: администратор сделал её обязательной."
+}
+
+func (p *Plugin) hasSignatureImage(userID, kind string) bool {
+	img, err := p.store.GetSignatureImage(userID, kind)
+	return err == nil && img != nil
+}
+
+// signatureMissing tells that the administrator requires a signature and
+// the settings have none.
+func (p *Plugin) signatureMissing(s store.Settings) bool {
+	return p.getConfiguration().requireSignature() && strings.TrimSpace(s.Signature) == ""
 }
 
 func cleanName(s string) string {
@@ -399,6 +440,13 @@ func (p *Plugin) handleConnect(w http.ResponseWriter, r *http.Request) {
 	if req.Settings != nil {
 		settings = sanitizeSettings(*req.Settings)
 	}
+	if p.signatureMissing(settings) {
+		writeError(w, http.StatusBadRequest, codeNoSignature, "")
+		return
+	}
+	// Pictures of the signature survive reconnecting.
+	settings.SignatureImage = p.hasSignatureImage(userID, store.ImagePhoto)
+	settings.SignatureLogo = p.hasSignatureImage(userID, store.ImageLogo)
 
 	ctx, cancel := context.WithTimeout(r.Context(), checkTimeout)
 	defer cancel()
@@ -499,10 +547,15 @@ func (p *Plugin) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotConnected, "")
 		return
 	}
-	hasImage := account.Settings.SignatureImage
-	account.Settings = sanitizeSettings(req.Settings)
-	// The picture flag is managed by /signature-image, not by the form.
-	account.Settings.SignatureImage = hasImage
+	hasImage, hasLogo := account.Settings.SignatureImage, account.Settings.SignatureLogo
+	settings := sanitizeSettings(req.Settings)
+	if p.signatureMissing(settings) {
+		writeError(w, http.StatusBadRequest, codeNoSignature, "")
+		return
+	}
+	account.Settings = settings
+	// The picture flags are managed by /signature-image, not by the form.
+	account.Settings.SignatureImage, account.Settings.SignatureLogo = hasImage, hasLogo
 	if req.DisplayName != nil {
 		account.DisplayName = cleanName(*req.DisplayName)
 	}

@@ -94,8 +94,8 @@ export function attachmentUrl(folder: string, uid: number, part: string, inline 
 
 // signatureImageUrl shows the stored signature picture; the version
 // parameter defeats the browser cache after it is replaced.
-export function signatureImageUrl(version: number | string = '') {
-    return `${baseUrl()}/signature-image${q({v: version})}`;
+export function signatureImageUrl(version: number | string = '', kind: 'photo' | 'logo' = 'photo') {
+    return `${baseUrl()}/signature-image${q({kind: kind === 'logo' ? 'logo' : undefined, v: version})}`;
 }
 
 export const api = {
@@ -137,8 +137,8 @@ export const api = {
         request<{ok: boolean; rule: SortRule; rules: SortRule[]; sorted: number; moved: number}>('POST', '/rules', rule),
     deleteRule: (id: string) => request<{ok: boolean; rules: SortRule[]}>('POST', '/rules/delete', {id}),
 
-    saveSignatureImage: (dataUrl: string) => request<Me>('PUT', '/signature-image', {data_url: dataUrl}),
-    deleteSignatureImage: () => request<Me>('POST', '/signature-image/delete'),
+    saveSignatureImage: (dataUrl: string, kind: 'photo' | 'logo' = 'photo') => request<Me>('PUT', '/signature-image', {data_url: dataUrl, kind}),
+    deleteSignatureImage: (kind: 'photo' | 'logo' = 'photo') => request<Me>('POST', '/signature-image/delete', {kind}),
 
     share: (folder: string, uid: number, channelId: string, rootId: string, comment: string, withFile: boolean) =>
         request<{ok: boolean; post_id: string}>('POST', '/share', {folder, uid, channel_id: channelId, root_id: rootId, comment, with_file: withFile}),

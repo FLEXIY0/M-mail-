@@ -40,7 +40,16 @@ export default function SettingsDialog() {
         setSaveError(null);
         try {
             const iconChanged = iconChoice.action !== choiceFrom(me.icon).action || iconChoice.webUrl.trim() !== me.icon.custom_web_url;
-            const updated = await api.saveSettings(displayName, settings);
+
+            // The signature is edited on its own screen and saved there.
+            const current = getState().me?.settings;
+            const updated = await api.saveSettings(displayName, {
+                ...settings,
+                signature: current?.signature ?? settings.signature,
+                signature_html: current?.signature_html,
+                signature_layout: current?.signature_layout,
+                signature_logo_height: current?.signature_logo_height,
+            });
             setState({me: updated});
             if (iconChanged) {
                 await saveIconChoice(iconChoice);
@@ -127,6 +136,7 @@ export default function SettingsDialog() {
                     email={me.email || me.username || ''}
                     botUsername={config.bot_username}
                     signatureImage={true}
+                    required={config.require_signature}
                 />
             </section>
 

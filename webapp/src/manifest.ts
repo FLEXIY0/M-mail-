@@ -8,7 +8,7 @@ const manifest = JSON.parse(`
     "homepage_url": "https://github.com/FLEXIY0/M-mail-",
     "support_url": "https://github.com/FLEXIY0/M-mail-/issues",
     "icon_path": "assets/icon.svg",
-    "version": "0.0.0+8f74f46",
+    "version": "0.0.0+80e7854",
     "min_server_version": "9.0.0",
     "server": {
         "executables": {
@@ -182,6 +182,16 @@ const manifest = JSON.parse(`
                 "help_text": "Суммарный размер файлов в одном отправляемом письме. Не больше 50 МБ; Mail.ru и Яндекс принимают письма до 25–30 МБ.",
                 "placeholder": "",
                 "default": 25,
+                "hosting": "",
+                "secret": false
+            },
+            {
+                "key": "RequireSignature",
+                "display_name": "Подпись обязательна",
+                "type": "bool",
+                "help_text": "Сотрудник не сможет сохранить настройки почты без подписи, и её нельзя убрать из письма перед отправкой. Подпись можно оформить: цвет, жирный шрифт, ссылки, фото и логотип компании.",
+                "placeholder": "",
+                "default": true,
                 "hosting": "",
                 "secret": false
             },
