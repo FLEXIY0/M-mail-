@@ -174,6 +174,11 @@ type iconInfo struct {
 	WebURL        string `json:"web_url"`
 	CustomWebURL  string `json:"custom_web_url"`
 	DefaultWebURL string `json:"default_web_url"`
+	// BrowserAllowed is false when the administrator turned the "open the
+	// web mail" mode off for this user; ForcedPanel tells that the user had
+	// chosen it, and the icon opens the panel anyway.
+	BrowserAllowed bool `json:"browser_allowed"`
+	ForcedPanel    bool `json:"forced_panel,omitempty"`
 }
 
 func timePtr(t time.Time) *time.Time {
@@ -183,12 +188,17 @@ func timePtr(t time.Time) *time.Time {
 	return &t
 }
 
-// iconInfoFor decides what the app bar icon opens. email picks the web
-// mail of the likely provider for users who did not connect.
-func (p *Plugin) iconInfoFor(prefs *store.Preferences, account *store.Account, email string) iconInfo {
-	info := iconInfo{Action: "panel"}
+// iconInfoFor decides what the app bar icon opens. The e-mail of the user
+// picks the web mail of the likely provider for users who did not connect.
+func (p *Plugin) iconInfoFor(prefs *store.Preferences, account *store.Account, userID string) iconInfo {
+	username, email := p.userNames(userID)
+	info := iconInfo{Action: "panel", BrowserAllowed: p.getConfiguration().browserModeAllowed(username, email)}
 	if prefs != nil && prefs.IconAction == "browser" {
-		info.Action = "browser"
+		if info.BrowserAllowed {
+			info.Action = "browser"
+		} else {
+			info.ForcedPanel = true
+		}
 	}
 	if account != nil {
 		info.DefaultWebURL = p.webURLFor(account.Provider)
@@ -203,11 +213,11 @@ func (p *Plugin) iconInfoFor(prefs *store.Preferences, account *store.Account, e
 	return info
 }
 
-func (p *Plugin) userEmail(userID string) string {
+func (p *Plugin) userNames(userID string) (username, email string) {
 	if user, err := p.client.User.Get(userID); err == nil && user != nil {
-		return user.Email
+		return user.Username, user.Email
 	}
-	return ""
+	return "", ""
 }
 
 func (p *Plugin) buildMe(userID string) (*meResponse, error) {
@@ -219,11 +229,7 @@ func (p *Plugin) buildMe(userID string) (*meResponse, error) {
 	if err != nil {
 		return nil, err
 	}
-	email := ""
-	if account == nil {
-		email = p.userEmail(userID)
-	}
-	me := &meResponse{Icon: p.iconInfoFor(prefs, account, email)}
+	me := &meResponse{Icon: p.iconInfoFor(prefs, account, userID)}
 	if account == nil {
 		return me, nil
 	}
@@ -390,14 +396,16 @@ func sanitizeSettings(in store.Settings) store.Settings {
 }
 
 const (
-	minLogoHeight     = 24
-	defaultLogoHeight = 48
-	maxLogoHeight     = 120
-	codeNoSignature   = "signature_required"
+	minLogoHeight      = 24
+	defaultLogoHeight  = 48
+	maxLogoHeight      = 120
+	codeNoSignature    = "signature_required"
+	codeBrowserModeOff = "browser_mode_disabled"
 )
 
 func init() {
 	errorMessages[codeNoSignature] = "Заполните подпись: администратор сделал её обязательной."
+	errorMessages[codeBrowserModeOff] = "Администратор выключил режим, в котором иконка сразу открывает веб-почту: иконка открывает панель почты."
 }
 
 func (p *Plugin) hasSignatureImage(userID, kind string) bool {
@@ -626,6 +634,10 @@ func (p *Plugin) handlePreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	prefs := &store.Preferences{}
 	if req.IconAction == "browser" {
+		if !p.getConfiguration().browserModeAllowed(p.userNames(userID)) {
+			writeError(w, http.StatusForbidden, codeBrowserModeOff, "")
+			return
+		}
 		prefs.IconAction = "browser"
 	}
 	if raw := strings.TrimSpace(req.WebURL); raw != "" {
@@ -641,5 +653,5 @@ func (p *Plugin) handlePreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	account, _ := p.store.GetAccount(userID)
-	writeJSON(w, http.StatusOK, p.iconInfoFor(prefs, account, p.userEmail(userID)))
+	writeJSON(w, http.StatusOK, p.iconInfoFor(prefs, account, userID))
 }

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/mattermost/mattermost/server/public/model"
 	"github.com/pkg/errors"
 
 	"github.com/FLEXIY0/M-mail-/server/secret"
@@ -39,13 +40,36 @@ type configuration struct {
 	// RequireSignature is a pointer so that "never saved" means the
 	// default (required), not false.
 	RequireSignature *bool
-	EncryptionKey    string
+	// IconBrowserMode is "allowed" (default) or "disabled": whether users
+	// may make the icon open the web mail instead of the panel.
+	IconBrowserMode string
+	// IconBrowserModeDisabledFor lists users (logins or e-mails) for whom
+	// that mode is off.
+	IconBrowserModeDisabledFor string
+	EncryptionKey              string
 
 	// UpdateSource is "owner/repo" on GitHub (or a release API URL).
 	UpdateSource string
 	// NotifyAdminsAboutUpdates is a pointer so that "never saved" means
 	// the default (on), not false.
 	NotifyAdminsAboutUpdates *bool
+}
+
+// browserModeAllowed tells whether the user may make the icon open the
+// web mail instead of the panel.
+func (c *configuration) browserModeAllowed(username, email string) bool {
+	if c.IconBrowserMode == "disabled" {
+		return false
+	}
+	for _, entry := range strings.FieldsFunc(c.IconBrowserModeDisabledFor, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r' || r == ' ' || r == '\t'
+	}) {
+		entry = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(entry), "@"))
+		if entry != "" && (entry == strings.ToLower(username) || entry == strings.ToLower(email)) {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *configuration) requireSignature() bool {
@@ -150,7 +174,14 @@ func (p *Plugin) OnConfigurationChange() error {
 		return errors.Wrap(err, "failed to load plugin configuration")
 	}
 
+	previous := p.getConfiguration()
 	p.setConfiguration(configuration)
+
+	// What the icon opens may have changed for everyone: open Mattermost
+	// tabs reload it, so nobody needs to refresh the page.
+	if previous.IconBrowserMode != configuration.IconBrowserMode || previous.IconBrowserModeDisabledFor != configuration.IconBrowserModeDisabledFor {
+		p.API.PublishWebSocketEvent(wsConfigChanged, map[string]any{}, &model.WebsocketBroadcast{})
+	}
 
 	if configuration.EncryptionKey != "" {
 		box, err := secret.New(configuration.EncryptionKey)

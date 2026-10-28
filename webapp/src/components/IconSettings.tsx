@@ -74,22 +74,26 @@ export function IconSettings({value, onChange, icon, providers}: {
                 role='radiogroup'
                 aria-label='Что открывает иконка почты'
             >
-                {options.map((o) => (
-                    <button
-                        key={o.id}
-                        type='button'
-                        role='radio'
-                        aria-checked={value.action === o.id}
-                        className={`mml-choice__item ${value.action === o.id ? 'mml-choice__item--on' : ''}`}
-                        onClick={() => onChange({...value, action: o.id})}
-                    >
-                        <span className='mml-choice__radio'>{value.action === o.id && <CheckIcon size={12}/>}</span>
-                        <span className='mml-choice__text'>
-                            <span className='mml-choice__title'>{o.title}</span>
-                            <span className='mml-choice__desc'>{o.desc}</span>
-                        </span>
-                    </button>
-                ))}
+                {options.map((o) => {
+                    const off = o.id === 'browser' && !icon.browser_allowed;
+                    return (
+                        <button
+                            key={o.id}
+                            type='button'
+                            role='radio'
+                            aria-checked={value.action === o.id}
+                            disabled={off}
+                            className={`mml-choice__item ${value.action === o.id ? 'mml-choice__item--on' : ''} ${off ? 'mml-choice__item--off' : ''}`}
+                            onClick={() => onChange({...value, action: o.id})}
+                        >
+                            <span className='mml-choice__radio'>{value.action === o.id && <CheckIcon size={12}/>}</span>
+                            <span className='mml-choice__text'>
+                                <span className='mml-choice__title'>{o.title}</span>
+                                <span className='mml-choice__desc'>{off ? 'Выключено администратором: иконка открывает панель. Веб-почту можно открыть кнопкой внизу панели.' : o.desc}</span>
+                            </span>
+                        </button>
+                    );
+                })}
             </div>
 
             <div className='mml-field mml-icon-settings__url'>
@@ -134,8 +138,11 @@ export function IconSettings({value, onChange, icon, providers}: {
                     {'Можно вставить любой адрес — например, веб-почту вашей компании. В приложении Mattermost для компьютера сайт откроется в браузере по умолчанию.'}
                 </span>
             </div>
-            {value.action === 'browser' && (
-                <div className='mml-hint'>{'Почту на панели всё равно можно открыть командой /mail.'}</div>
+            {icon.forced_panel && (
+                <div className='mml-hint'>{'Вы выбирали веб-почту, но администратор включил для вас панель. Если он снова разрешит, ваш выбор вернётся.'}</div>
+            )}
+            {value.action === 'browser' && icon.browser_allowed && (
+                <div className='mml-hint'>{'Передумать легко: после открытия сайта на несколько секунд появится панель с кнопкой «Пользоваться почтой здесь». А ещё почту на панели всегда открывает команда /mail.'}</div>
             )}
         </div>
     );

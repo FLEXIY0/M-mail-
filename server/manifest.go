@@ -19,7 +19,7 @@ const manifestStr = `
   "homepage_url": "https://github.com/FLEXIY0/M-mail-",
   "support_url": "https://github.com/FLEXIY0/M-mail-/issues",
   "icon_path": "assets/icon.svg",
-  "version": "0.0.0+4e3f77e",
+  "version": "0.0.0+118a080",
   "min_server_version": "9.0.0",
   "server": {
     "executables": {
@@ -193,6 +193,36 @@ const manifestStr = `
         "help_text": "Суммарный размер файлов в одном отправляемом письме. Не больше 50 МБ; Mail.ru и Яндекс принимают письма до 25–30 МБ.",
         "placeholder": "",
         "default": 25,
+        "hosting": "",
+        "secret": false
+      },
+      {
+        "key": "IconBrowserMode",
+        "display_name": "Режим «иконка сразу открывает веб-почту»",
+        "type": "dropdown",
+        "help_text": "Сотрудник может выбрать, чтобы иконка почты сразу открывала сайт почты вместо панели. Если выключить, иконка у всех открывает панель; выбор сотрудников сохраняется и вернётся, если снова разрешить.",
+        "placeholder": "",
+        "default": "allowed",
+        "options": [
+          {
+            "display_name": "Сотрудники выбирают сами",
+            "value": "allowed"
+          },
+          {
+            "display_name": "Выключен для всех: иконка открывает панель",
+            "value": "disabled"
+          }
+        ],
+        "hosting": "",
+        "secret": false
+      },
+      {
+        "key": "IconBrowserModeDisabledFor",
+        "display_name": "Выключить режим «сразу веб-почта» для сотрудников",
+        "type": "longtext",
+        "help_text": "Логины или адреса почты, через запятую или с новой строки, например: ivanov, petrova@company.ru. У этих сотрудников иконка всегда открывает панель почты, даже если они выбрали сайт.",
+        "placeholder": "",
+        "default": "",
         "hosting": "",
         "secret": false
       },

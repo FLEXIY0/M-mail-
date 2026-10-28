@@ -7,7 +7,7 @@ import {
     PaperclipIcon, PenIcon, PlusIcon, RefreshIcon, ReplyIcon, SearchIcon, SendIcon, SlidersIcon, SpamIcon, Spinner,
     ThumbDownIcon, TrashIcon,
 } from './icons';
-import IconSettingsDialog from './IconSettings';
+import IconSettingsDialog, {saveIconChoice} from './IconSettings';
 import MessageView from './MessageView';
 import {RuleEditor, RulesPage} from './Rules';
 import SettingsDialog from './SettingsDialog';
@@ -22,8 +22,8 @@ import {api} from '../api';
 import {addressLabel, avatarColor, dateGroup, formatListDate, initials, pluralMessages} from '../format';
 import {guides} from '../guides';
 import {
-    hideToast, loadAll, mailChanged, openCompose, openInBrowser, openRule, openRules, openWizard, pushRoute, refreshMe, setState,
-    showToast, useStore,
+    closePanel, hideToast, loadAll, mailChanged, openCompose, openInBrowser, openRule, openRules, openWizard, pushRoute, refreshMe,
+    setState, showToast, useStore,
 } from '../state';
 import type {Route} from '../state';
 import type {Address, Folder, FolderRole, Me, MessageFilter, MessageSummary, ProviderID} from '../types';
@@ -179,9 +179,13 @@ export default function Panel() {
     const loading = useStore((s) => s.loading);
     const loadError = useStore((s) => s.loadError);
     const routes = useStore((s) => s.routes);
+    const launchpad = useStore((s) => s.launchpad);
 
     React.useEffect(() => {
         loadAll();
+
+        // The note about the opened web mail belongs to that one click.
+        return () => setState({launchpad: null});
     }, []);
 
     if (!me) {
@@ -204,6 +208,15 @@ export default function Panel() {
                     </Callout>
                 ) : (loading && <Spinner size={24}/>)}
             </div>
+        );
+    }
+
+    if (launchpad) {
+        return (
+            <Launchpad
+                key={launchpad}
+                me={me}
+            />
         );
     }
 
@@ -291,6 +304,92 @@ function readDrag(e: React.DragEvent): DragData | null {
     }
 }
 
+const LAUNCHPAD_SECONDS = 8;
+
+function hostOf(url: string) {
+    try {
+        return new URL(url).host;
+    } catch {
+        return url;
+    }
+}
+
+// Launchpad shows after the icon opened the web mail: the user can switch
+// to the mail in Mattermost or change the setting. It closes by itself
+// unless the user points at it.
+function Launchpad({me}: {me: Me}) {
+    const [paused, setPaused] = React.useState(false);
+    const [saving, setSaving] = React.useState(false);
+    React.useEffect(() => {
+        if (paused) {
+            return undefined;
+        }
+        const timer = window.setTimeout(() => {
+            setState({launchpad: null});
+            closePanel();
+        }, LAUNCHPAD_SECONDS * 1000);
+        return () => window.clearTimeout(timer);
+    }, [paused]);
+
+    const usePanel = async () => {
+        setSaving(true);
+        try {
+            await saveIconChoice({action: 'panel', webUrl: me.icon.custom_web_url});
+            showToast(me.connected ? 'Иконка теперь открывает почту здесь' : 'Иконка теперь открывает почту здесь — осталось подключить ящик');
+        } catch (e) {
+            showToast((e as ApiError).message, {kind: 'error'});
+        }
+        setState({launchpad: null});
+    };
+
+    return (
+        <div
+            className='mml-panel mml-launchpad'
+            onMouseEnter={() => setPaused(true)}
+            onFocus={() => setPaused(true)}
+        >
+            <div className='mml-launchpad__art'>
+                <ExternalIcon size={28}/>
+            </div>
+            <h3>{'Почта открыта в новой вкладке'}</h3>
+            <p className='mml-muted'>{hostOf(me.icon.web_url)}</p>
+            <div className='mml-launchpad__actions'>
+                <Button
+                    variant='primary'
+                    loading={saving}
+                    onClick={usePanel}
+                >
+                    {'Пользоваться почтой здесь'}
+                </Button>
+                <Button
+                    variant='secondary'
+                    onClick={() => openInBrowser(me.icon.web_url)}
+                >
+                    {'Открыть ещё раз'}
+                    <ExternalIcon size={14}/>
+                </Button>
+                <button
+                    type='button'
+                    className='mml-link mml-small'
+                    onClick={() => {
+                        setState({launchpad: null});
+                        openWizard('icon');
+                    }}
+                >
+                    {'Что открывает иконка…'}
+                </button>
+            </div>
+            <p className='mml-muted mml-small mml-launchpad__note'>{'Эта панель закроется сама. Почту в Mattermost можно открыть и командой /mail.'}</p>
+            {!paused && (
+                <span
+                    className='mml-launchpad__timer'
+                    style={{animationDuration: `${LAUNCHPAD_SECONDS}s`}}
+                />
+            )}
+        </div>
+    );
+}
+
 function ConnectPrompt() {
     const config = useStore((s) => s.config);
     const me = useStore((s) => s.me);
@@ -341,13 +440,15 @@ function ConnectPrompt() {
                         {'Открыть почту в браузере'}
                         <ExternalIcon size={14}/>
                     </Button>
-                    <button
-                        type='button'
-                        className='mml-link mml-small'
-                        onClick={() => openWizard('icon')}
-                    >
-                        {me.icon.action === 'browser' ? 'Иконка открывает веб-почту · изменить' : 'Открывать веб-почту сразу по иконке'}
-                    </button>
+                    {me.icon.browser_allowed && (
+                        <button
+                            type='button'
+                            className='mml-link mml-small'
+                            onClick={() => openWizard('icon')}
+                        >
+                            {me.icon.action === 'browser' ? 'Иконка открывает веб-почту · изменить' : 'Открывать веб-почту сразу по иконке'}
+                        </button>
+                    )}
                 </div>
             )}
         </div>

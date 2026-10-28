@@ -2607,3 +2607,82 @@ $flag: #ff5c5c;
 
     input { flex: 1; max-width: 200px; accent-color: $accent; }
 }
+
+// Icon: "the web mail opened" note --------------------------------------------
+
+.mml-choice__item--off { opacity: 0.55; cursor: not-allowed !important; }
+
+.mml-launchpad {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100%;
+    padding: 32px 24px;
+    text-align: center;
+
+    h3 { margin: 16px 0 4px; font-size: 20px; }
+
+    &__art {
+        display: flex;
+        width: 72px;
+        height: 72px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: accent(0.1);
+        color: $accent;
+    }
+
+    &__actions {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+        width: min(300px, 100%);
+        margin-top: 20px;
+
+        .mml-link { align-self: center; margin-top: 4px; }
+    }
+
+    &__note { margin-top: 20px; }
+
+    &__timer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 3px;
+        background: $accent;
+        transform-origin: left;
+        animation: mml-countdown linear forwards;
+    }
+}
+
+// Unread counter on the App Bar icon ------------------------------------------
+// Set by updateIconBadge in index.tsx. :has() keeps the rule to our icon.
+
+.mml-has-unread .app-bar__icon-inner:has(> img[alt='com.github.flexiy0.mail']),
+.mml-has-unread .app-bar__icon:has(img[alt='com.github.flexiy0.mail']) {
+    position: relative;
+    overflow: visible;
+}
+
+.mml-has-unread .app-bar__icon-inner:has(> img[alt='com.github.flexiy0.mail'])::after {
+    content: var(--mml-unread, '');
+    position: absolute;
+    top: -5px;
+    right: -7px;
+    min-width: 16px;
+    height: 16px;
+    padding: 0 4px;
+    box-sizing: border-box;
+    border: 2px solid var(--sidebar-bg, #1e325c);
+    border-radius: 8px;
+    background: #e5484d;
+    color: #fff;
+    font: 700 10px/12px 'Open Sans', sans-serif;
+    text-align: center;
+    pointer-events: none;
+}

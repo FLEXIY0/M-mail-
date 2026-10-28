@@ -41,3 +41,18 @@ func TestRuleFor(t *testing.T) {
 	assert.Equal(t, -1, ruleFor(rules, from("anna@notexample.ru")), "the domain matches whole labels")
 	assert.Equal(t, -1, ruleFor(rules, nil))
 }
+
+func TestBrowserModeAllowed(t *testing.T) {
+	c := &configuration{}
+	assert.True(t, c.browserModeAllowed("ivanov", "ivanov@corp.ru"), "allowed by default")
+
+	c.IconBrowserModeDisabledFor = "@Ivanov, petrova@corp.ru\nsidorov ;  "
+	assert.False(t, c.browserModeAllowed("ivanov", "i@corp.ru"), "login, with @ and any case")
+	assert.False(t, c.browserModeAllowed("anna", "Petrova@corp.ru"), "e-mail")
+	assert.False(t, c.browserModeAllowed("sidorov", ""))
+	assert.True(t, c.browserModeAllowed("ivanova", "ivanova@corp.ru"), "whole names only")
+	assert.True(t, c.browserModeAllowed("", ""))
+
+	c.IconBrowserMode = "disabled"
+	assert.False(t, c.browserModeAllowed("anyone", "anyone@corp.ru"))
+}

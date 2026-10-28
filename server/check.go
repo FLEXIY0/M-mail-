@@ -21,11 +21,12 @@ const (
 	notificationColor = "#005ff9"
 	checkSoonInterval = 15 * time.Second
 
-	wsMailUpdated = "mail_updated"
-	wsOpenWizard  = "open_wizard"
-	wsOpenPanel   = "open_panel"
-	wsOpenCompose = "open_compose"
-	wsOpenMessage = "open_message"
+	wsMailUpdated   = "mail_updated"
+	wsOpenWizard    = "open_wizard"
+	wsOpenPanel     = "open_panel"
+	wsOpenCompose   = "open_compose"
+	wsOpenMessage   = "open_message"
+	wsConfigChanged = "config_changed"
 )
 
 var userLocks sync.Map

@@ -57,6 +57,10 @@ export interface State {
     revision: number;
 
     toast: Toast | null;
+
+    // Set when the icon opened the web mail: the panel shows for a few
+    // seconds with a way back to the mail in Mattermost.
+    launchpad: number | null;
 }
 
 // Toast is a short message at the bottom of the panel, e.g. "Письмо
@@ -80,6 +84,7 @@ let state: State = {
     folderRequest: null,
     revision: 0,
     toast: null,
+    launchpad: null,
 };
 
 const listeners = new Set<() => void>();
@@ -91,6 +96,15 @@ export function getState(): State {
 export function setState(patch: Partial<State>) {
     state = {...state, ...patch};
     listeners.forEach((l) => l());
+}
+
+// subscribe calls fn after every change of the state; returns the
+// unsubscribe function.
+export function subscribe(fn: () => void): () => void {
+    listeners.add(fn);
+    return () => {
+        listeners.delete(fn);
+    };
 }
 
 export function useStore<T>(selector: (s: State) => T): T {
@@ -237,6 +251,16 @@ let showPanel: () => void = () => {};
 
 export function setShowPanel(fn: () => void) {
     showPanel = fn;
+}
+
+let hidePanel: () => void = () => {};
+
+export function setHidePanel(fn: () => void) {
+    hidePanel = fn;
+}
+
+export function closePanel() {
+    hidePanel();
 }
 
 export function openPanel() {

@@ -58,6 +58,12 @@ export interface IconInfo {
     web_url: string;
     custom_web_url: string;
     default_web_url: string;
+
+    // false: the administrator turned off "the icon opens the web mail".
+    browser_allowed: boolean;
+
+    // The user chose the web mail, but the administrator wants the panel.
+    forced_panel?: boolean;
 }
 
 export interface SyncInfo {

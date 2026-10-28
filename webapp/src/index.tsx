@@ -10,7 +10,7 @@ import Panel, {PanelTitle} from './components/Panel';
 import UpdatePanel from './components/UpdatePanel';
 import {
     getState, loadAll, mailChanged, openCompose, openInBrowser, openMessage, openWizard,
-    refreshMe, setReduxStore, setShowPanel,
+    refreshMe, setHidePanel, setReduxStore, setShowPanel, setState, subscribe,
 } from './state';
 import './styles.scss';
 import type {WizardMode} from './types';
@@ -19,6 +19,7 @@ type AnyRegistry = Record<string, any>;
 
 interface RHSHandles {
     showRHSPlugin: unknown;
+    hideRHSPlugin: unknown;
     toggleRHSPlugin: unknown;
 }
 
@@ -40,6 +41,11 @@ function registerPanel(registry: AnyRegistry, store: Store<GlobalState>): RHSHan
         const icon = getState().me?.icon;
         if (icon?.action === 'browser' && icon.web_url) {
             openInBrowser(icon.web_url);
+
+            // A way back: for a few seconds the panel offers to read the
+            // mail in Mattermost or to change what the icon opens.
+            setState({launchpad: Date.now()});
+            store.dispatch(rhs.showRHSPlugin as any);
             return;
         }
         store.dispatch(rhs.toggleRHSPlugin as any);
@@ -76,11 +82,35 @@ function composeFromPost(store: Store<GlobalState>, postId: string) {
     });
 }
 
+// updateIconBadge puts the number of unread messages in Inbox on the
+// mail icon. Mattermost has no badges for plugin icons, so styles.scss
+// draws it next to the icon (found by its alt, the plugin id) from two
+// values on the root element. Without them the icon stays neutral.
+let shownUnread = -1;
+
+function updateIconBadge() {
+    const me = getState().me;
+    const unread = me?.connected ? me.sync?.unseen || 0 : 0;
+    if (unread === shownUnread) {
+        return;
+    }
+    shownUnread = unread;
+    const root = document.documentElement;
+    if (unread > 0) {
+        root.style.setProperty('--mml-unread', `"${unread > 99 ? '99+' : unread}"`);
+        root.classList.add('mml-has-unread');
+    } else {
+        root.style.removeProperty('--mml-unread');
+        root.classList.remove('mml-has-unread');
+    }
+}
+
 export default class Plugin {
     public async initialize(registry: AnyRegistry, store: Store<GlobalState>) {
         setReduxStore(store);
         const rhs = registerPanel(registry, store);
         setShowPanel(() => store.dispatch(rhs.showRHSPlugin as any));
+        setHidePanel(() => store.dispatch(rhs.hideRHSPlugin as any));
 
         if (typeof registry.registerAdminConsoleCustomSetting === 'function') {
             registry.registerAdminConsoleCustomSetting('UpdatePanel', UpdatePanel, {showTitle: true});
@@ -108,6 +138,9 @@ export default class Plugin {
         }
 
         const prefix = `custom_${manifest.id}_`;
+        registry.registerWebSocketEventHandler(`${prefix}config_changed`, () => {
+            refreshMe();
+        });
         registry.registerWebSocketEventHandler(`${prefix}mail_updated`, () => {
             refreshMe();
             mailChanged();
@@ -125,14 +158,19 @@ export default class Plugin {
             }
         });
         registry.registerWebSocketEventHandler(`${prefix}open_panel`, () => {
+            // "/mail" opens the mail itself, also for users whose icon opens
+            // the web mail.
+            setState({launchpad: null});
             store.dispatch(rhs.showRHSPlugin as any);
         });
         registry.registerReconnectHandler(() => {
             loadAll(true);
         });
 
-        // Warm up so that the panel opens instantly.
+        // Warm up so that the panel opens instantly, and the icon shows
+        // the number of unread messages from the start.
         loadAll();
+        subscribe(updateIconBadge);
     }
 }
 

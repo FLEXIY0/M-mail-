@@ -18,13 +18,13 @@ const helpText = `#### :email: Почта — справка
 
 | Команда | Что делает |
 |---|---|
-| ` + "`/mail`" + ` | открыть почту на правой панели |
+| ` + "`/mail`" + ` | открыть почту на правой панели — даже если иконка у вас открывает сайт |
 | ` + "`/mail new [адрес]`" + ` | написать письмо |
 | ` + "`/mail inbox`" + ` | непрочитанные письма во «Входящих» (работает и на телефоне) |
 | ` + "`/mail web`" + ` | ссылка на почту в браузере |
 | ` + "`/mail connect`" + ` | подключить почту (мастер по шагам) |
 | ` + "`/mail sync`" + ` | проверить почту сейчас |
-| ` + "`/mail settings`" + ` | уведомления, подпись, имя отправителя |
+| ` + "`/mail settings`" + ` | уведомления, подпись, имя отправителя, что открывает иконка |
 | ` + "`/mail disconnect`" + ` | отключить почту и удалить сохранённые данные |
 
 Любое сообщение можно отправить по почте: **«Действия» (⋯) → «Отправить по почте»**.
@@ -127,7 +127,7 @@ func (p *Plugin) ExecuteCommand(_ *plugin.Context, args *model.CommandArgs) (*mo
 func (p *Plugin) webResponse(userID string) *model.CommandResponse {
 	account, _ := p.store.GetAccount(userID)
 	prefs, _ := p.store.GetPreferences(userID)
-	info := p.iconInfoFor(prefs, account, p.userEmail(userID))
+	info := p.iconInfoFor(prefs, account, userID)
 	if link := safeLink(info.WebURL); link != "" {
 		return ephemeral(fmt.Sprintf(":globe_with_meridians: [Открыть почту в браузере](%s)", link))
 	}
