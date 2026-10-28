@@ -46,6 +46,14 @@ type Plugin struct {
 	// checking holds users whose background check is waiting or running.
 	checking sync.Map
 
+	// office caches what Collabora Online can open.
+	office officeState
+
+	// contacts are address books built from the mail history; avatars are
+	// photos of senders who are not in Mattermost.
+	contacts *contactBook
+	avatars  *avatarCache
+
 	// configurationLock synchronizes access to the configuration.
 	configurationLock sync.RWMutex
 
@@ -65,6 +73,8 @@ func (p *Plugin) OnActivate() error {
 	p.sendLimiter = newRateLimiter(60, time.Hour)
 	p.sessions = newSessionPool(sessionIdleTimeout)
 	p.directory = newUserDirectory()
+	p.contacts = newContactBook()
+	p.avatars = newAvatarCache()
 	p.updater = newUpdater()
 
 	if err := p.ensureEncryptionKey(); err != nil {

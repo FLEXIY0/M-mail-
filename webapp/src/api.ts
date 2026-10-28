@@ -2,7 +2,8 @@ import manifest from 'manifest';
 
 import type {
     CheckResult, Endpoint, Folder, IconAction, IconInfo, MattermostUser, Me, Message,
-    MessagePage, PluginConfig, SendRequest, Settings, SortRule, SortRuleInput, UpdateInfo,
+    AttachmentRef, AttachmentView, CollaboraCheck, Contact, MessagePage, OfficeSession, PluginConfig, SendRequest, Settings, SortRule,
+    SortRuleInput, UpdateInfo,
 } from './types';
 
 export class ApiError extends Error {
@@ -88,8 +89,18 @@ const q = (params: Record<string, string | number | undefined>) => {
 
 // attachmentUrl downloads a file through the plugin; the browser sends the
 // session cookie, so no token is needed in the address.
-export function attachmentUrl(folder: string, uid: number, part: string, inline = false) {
-    return `${baseUrl()}/attachment${q({folder, uid, part, inline: inline ? 1 : undefined})}`;
+export function attachmentUrl(folder: string, uid: number, part: string, inline = false, sub?: number) {
+    return `${baseUrl()}/attachment${q({folder, uid, part, sub, inline: inline ? 1 : undefined})}`;
+}
+
+// avatarUrl is the photo of an external sender; 404 when there is none.
+export function avatarUrl(email: string) {
+    return `${baseUrl()}/avatar${q({email})}`;
+}
+
+// zipEntryUrl downloads one file of an archive.
+export function zipEntryUrl(ref: AttachmentRef, entry: number) {
+    return `${baseUrl()}/attachment/zip${q({folder: ref.folder, uid: ref.uid, part: ref.part, sub: ref.sub, entry})}`;
 }
 
 // signatureImageUrl shows the stored signature picture; the version
@@ -131,6 +142,12 @@ export const api = {
     deleteFolder: (name: string) => request<{ok: boolean}>('POST', '/folders/delete', {name}),
     readAll: (folder: string) => request<{ok: boolean}>('POST', '/folders/read', {folder}),
     emptyFolder: (folder: string) => request<{ok: boolean}>('POST', '/folders/empty', {folder}),
+
+    contacts: (refresh = false) => request<{contacts: Contact[]}>('GET', `/contacts${refresh ? '?refresh=1' : ''}`),
+    attachmentView: (ref: AttachmentRef) =>
+        request<AttachmentView>('GET', `/attachment/view${q({folder: ref.folder, uid: ref.uid, part: ref.part, sub: ref.sub})}`),
+    officeOpen: (ref: AttachmentRef) => request<OfficeSession>('POST', '/office/open', ref),
+    collaboraCheck: () => request<CollaboraCheck>('GET', '/admin/collabora/check'),
 
     rules: () => request<{rules: SortRule[]}>('GET', '/rules'),
     saveRule: (rule: SortRuleInput) =>

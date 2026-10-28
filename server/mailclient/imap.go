@@ -953,3 +953,51 @@ func (m *IMAP) Copy(ctx context.Context, folder string, uids []uint32, to string
 		return err
 	})
 }
+
+// Envelope is who wrote to whom, for the address book.
+type Envelope struct {
+	From []Address
+	To   []Address
+	Cc   []Address
+	Date time.Time
+}
+
+// RecentEnvelopes returns the senders and recipients of the last n
+// messages of a folder.
+func (m *IMAP) RecentEnvelopes(ctx context.Context, folder string, n int) ([]Envelope, error) {
+	data, err := m.selectFolder(ctx, folder, true)
+	if err != nil {
+		return nil, err
+	}
+	if data.NumMessages == 0 {
+		return nil, nil
+	}
+	start := uint32(1)
+	if data.NumMessages > uint32(n) {
+		start = data.NumMessages - uint32(n) + 1
+	}
+	var seq imap.SeqSet
+	seq.AddRange(start, data.NumMessages)
+	var bufs []*imapclient.FetchMessageBuffer
+	err = m.do(ctx, "fetch", func() error {
+		var err error
+		bufs, err = m.client.Fetch(seq, &imap.FetchOptions{Envelope: true}).Collect()
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Envelope, 0, len(bufs))
+	for _, b := range bufs {
+		if b.Envelope == nil {
+			continue
+		}
+		out = append(out, Envelope{
+			From: convertAddresses(b.Envelope.From),
+			To:   convertAddresses(b.Envelope.To),
+			Cc:   convertAddresses(b.Envelope.Cc),
+			Date: b.Envelope.Date,
+		})
+	}
+	return out, nil
+}

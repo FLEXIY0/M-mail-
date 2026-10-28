@@ -1,5 +1,6 @@
 import React from 'react';
 
+import {viewKind} from './AttachmentViewer';
 import {
     ArrowLeftIcon, BookmarkIcon, ChevronDown, CircleIcon, DownloadIcon, ForwardIcon,
     ImageIcon, MoreVerticalIcon, MoveIcon, PaperclipIcon, ReplyAllIcon, ReplyIcon, ShareIcon, Spinner,
@@ -12,7 +13,7 @@ import {Linkify} from './ui';
 import type {ApiError} from '../api';
 import {api, attachmentUrl} from '../api';
 import {addressFull, addressLabel, formatFullDate, formatSize} from '../format';
-import {mailChanged, openCompose, openInBrowser, openRule, openShare, popRoute, showToast} from '../state';
+import {mailChanged, openAttachment, openCompose, openInBrowser, openRule, openShare, popRoute, showToast} from '../state';
 import type {Folder, Me, Message, MessageRef} from '../types';
 
 // Folders are listed once per panel and shared by all opened messages.
@@ -389,18 +390,36 @@ export default function MessageView({me, msgRef}: {me: Me; msgRef: MessageRef}) 
                         </div>
                         <ul>
                             {visibleAttachments.map((a) => (
-                                <li key={a.part}>
-                                    <a
+                                <li
+                                    key={a.part}
+                                    className='mml-attachment-row'
+                                >
+                                    <button
+                                        type='button'
                                         className='mml-attachment'
-                                        href={attachmentUrl(msgRef.folder, msgRef.uid, a.part)}
-                                        download={a.filename}
-                                        title={`Скачать ${a.filename}`}
+                                        title={`Открыть ${a.filename}`}
+                                        onClick={() => openAttachment({folder: msgRef.folder, uid: msgRef.uid, part: a.part}, visibleAttachments)}
                                     >
-                                        <span className='mml-attachment__ext'>{(a.filename.split('.').pop() || '').slice(0, 4).toUpperCase() || 'FILE'}</span>
+                                        {viewKind(a.content_type, a.filename) === 'image' ? (
+                                            <img
+                                                className='mml-attachment__thumb'
+                                                src={attachmentUrl(msgRef.folder, msgRef.uid, a.part, true)}
+                                                alt=''
+                                                loading='lazy'
+                                            />
+                                        ) : <span className='mml-attachment__ext'>{(a.filename.split('.').pop() || '').slice(0, 4).toUpperCase() || 'FILE'}</span>}
                                         <span className='mml-attachment__text'>
                                             <span className='mml-attachment__name mml-ellipsis'>{a.filename}</span>
                                             <span className='mml-muted mml-small'>{formatSize(a.size)}</span>
                                         </span>
+                                    </button>
+                                    <a
+                                        className='mml-icon-btn mml-attachment__download'
+                                        href={attachmentUrl(msgRef.folder, msgRef.uid, a.part)}
+                                        download={a.filename}
+                                        title={`Скачать ${a.filename}`}
+                                        aria-label={`Скачать ${a.filename}`}
+                                    >
                                         <DownloadIcon size={16}/>
                                     </a>
                                 </li>

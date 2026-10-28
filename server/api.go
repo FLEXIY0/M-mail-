@@ -59,14 +59,31 @@ func (p *Plugin) initRouter() *mux.Router {
 	api.HandleFunc("/rules", p.handleRules).Methods(http.MethodGet)
 	api.HandleFunc("/rules", p.handleSaveRule).Methods(http.MethodPost)
 	api.HandleFunc("/rules/delete", p.handleDeleteRule).Methods(http.MethodPost)
+	api.HandleFunc("/contacts", p.handleContacts).Methods(http.MethodGet)
+	api.HandleFunc("/avatar", p.handleAvatar).Methods(http.MethodGet)
+	api.HandleFunc("/attachment/view", p.handleAttachmentView).Methods(http.MethodGet)
+	api.HandleFunc("/attachment/zip", p.handleZipEntry).Methods(http.MethodGet)
+	api.HandleFunc("/office/open", p.handleOfficeOpen).Methods(http.MethodPost)
+	api.HandleFunc("/admin/collabora/check", p.handleCollaboraCheck).Methods(http.MethodGet)
 	api.HandleFunc("/share", p.handleShare).Methods(http.MethodPost)
 	api.HandleFunc("/actions/open", p.handleActionOpen).Methods(http.MethodPost)
 	api.HandleFunc("/actions/read", p.handleActionRead).Methods(http.MethodPost)
+
+	// Collabora calls these without a Mattermost session: the access token
+	// of the file is the authorization.
+	wopi := router.PathPrefix("/wopi/files/{id}").Subrouter()
+	wopi.HandleFunc("", p.handleWopiInfo).Methods(http.MethodGet)
+	wopi.HandleFunc("/contents", p.handleWopiContents).Methods(http.MethodGet)
+	wopi.PathPrefix("").HandlerFunc(p.handleWopiReadOnly)
 	return router
 }
 
 func (p *Plugin) requireUser(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/wopi/") {
+			next.ServeHTTP(w, r)
+			return
+		}
 		if r.Header.Get("Mattermost-User-ID") == "" {
 			writeError(w, http.StatusUnauthorized, codeBadRequest, "not authorized")
 			return
@@ -138,6 +155,8 @@ func (p *Plugin) handleConfig(w http.ResponseWriter, r *http.Request) {
 		"bot_username":         botUsername,
 		"max_attachment_bytes": cfg.maxAttachmentBytes(),
 		"require_signature":    cfg.requireSignature(),
+		"office_viewer":        cfg.collaboraURL() != "",
+		"sender_photos":        cfg.senderPhotos(),
 		"position":             position,
 	})
 }

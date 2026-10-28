@@ -8,7 +8,7 @@ const manifest = JSON.parse(`
     "homepage_url": "https://github.com/FLEXIY0/M-mail-",
     "support_url": "https://github.com/FLEXIY0/M-mail-/issues",
     "icon_path": "assets/icon.svg",
-    "version": "0.0.0+aa9a026",
+    "version": "0.0.0+c88b524",
     "min_server_version": "9.0.0",
     "server": {
         "executables": {
@@ -222,6 +222,46 @@ const manifest = JSON.parse(`
                 "help_text": "Сотрудник не сможет сохранить настройки почты без подписи, и её нельзя убрать из письма перед отправкой. Подпись можно оформить: цвет, жирный шрифт, ссылки, фото и логотип компании.",
                 "placeholder": "",
                 "default": true,
+                "hosting": "",
+                "secret": false
+            },
+            {
+                "key": "SenderPhotos",
+                "display_name": "Фото отправителей из Mail.ru",
+                "type": "bool",
+                "help_text": "Для отправителей, которых нет в Mattermost, показывать фото из сервиса аватаров Mail.ru (filin.mail.ru) — так же, как в Почте Mail.ru и VK WorkSpace. Запросы идут с сервера Mattermost и кешируются; сотрудники и их браузеры к Mail.ru не обращаются. Выключите, если сервер не должен ходить в интернет.",
+                "placeholder": "",
+                "default": true,
+                "hosting": "",
+                "secret": false
+            },
+            {
+                "key": "CollaboraURL",
+                "display_name": "Адрес Collabora Online",
+                "type": "text",
+                "help_text": "Для просмотра Word, Excel, PowerPoint и других документов прямо в Mattermost. Пусто — документы скачиваются. Картинки, PDF, видео, текст, архивы и вложенные письма показываются и без Collabora. Collabora должна доверять адресу Mattermost — проверьте кнопкой ниже после сохранения.",
+                "placeholder": "https://collabora.company.ru",
+                "default": "",
+                "hosting": "",
+                "secret": false
+            },
+            {
+                "key": "CollaboraWOPIURL",
+                "display_name": "Адрес Mattermost для Collabora (необязательно)",
+                "type": "text",
+                "help_text": "Если Collabora должна забирать файлы по другому адресу Mattermost (например, внутреннему), впишите его. Пусто — используется Site URL.",
+                "placeholder": "Site URL Mattermost",
+                "default": "",
+                "hosting": "",
+                "secret": false
+            },
+            {
+                "key": "CollaboraCheck",
+                "display_name": "Проверка Collabora",
+                "type": "custom",
+                "help_text": "",
+                "placeholder": "",
+                "default": null,
                 "hosting": "",
                 "secret": false
             },

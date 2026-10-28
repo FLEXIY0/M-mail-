@@ -1,7 +1,7 @@
 import React from 'react';
 
 import {api} from './api';
-import type {Me, MessageRef, PluginConfig, Recipient, WizardMode} from './types';
+import type {Attachment, AttachmentRef, Me, MessageRef, PluginConfig, Recipient, WizardMode} from './types';
 
 // A tiny global store shared by the panel, the wizard and websocket
 // handlers. Mattermost's own Redux store is left alone on purpose: plugin
@@ -32,6 +32,7 @@ export type Route =
     | {name: 'share'; ref: MessageRef}
     | {name: 'rules'}
     | {name: 'signature'}
+    | {name: 'attachment'; ref: AttachmentRef; list: Attachment[]}
     | {name: 'rule'; rule: SortRuleDraft};
 
 // SortRuleDraft opens the rule editor: a new rule, prefilled e.g. with the
@@ -170,6 +171,10 @@ export function pushRoute(route: Route) {
             return (r as typeof route).request.id === route.request.id;
         case 'rule':
             return false;
+        case 'attachment': {
+            const a = (r as typeof route).ref;
+            return a.folder === route.ref.folder && a.uid === route.ref.uid && a.part === route.ref.part && a.sub === route.ref.sub;
+        }
         }
         return true;
     };
@@ -316,4 +321,20 @@ export function openSignature() {
 
 export function closeSignature() {
     popWhile(['signature']);
+}
+
+// openAttachment shows an attachment in the panel; list holds the other
+// attachments of the message for paging.
+export function openAttachment(ref: AttachmentRef, list: Attachment[]) {
+    pushRoute({name: 'attachment', ref, list});
+}
+
+// pageAttachment shows another attachment in place of the open one.
+export function pageAttachment(ref: AttachmentRef, list: Attachment[]) {
+    const routes = state.routes.slice(0, -1);
+    setState({routes: [...routes, {name: 'attachment', ref, list}]});
+}
+
+export function closeAttachment() {
+    popWhile(['attachment']);
 }

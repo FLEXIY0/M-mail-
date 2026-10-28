@@ -61,6 +61,29 @@ services:
       - "3465:3465"   # SMTPS (self-signed)
       - "3993:3993"   # IMAPS (self-signed)
 
+  # Collabora Online for viewing office attachments (optional):
+  #   docker compose --profile office up -d collabora
+  # Plugin settings: Collabora URL http://collabora:9980,
+  # Mattermost address for Collabora http://mattermost:8065.
+  collabora:
+    image: collabora/code:latest
+    profiles: ["office"]
+    restart: unless-stopped
+    environment:
+      aliasgroup1: http://mattermost:8065
+      server_name: localhost:9980
+      extra_params: >-
+        --o:ssl.enable=false
+        --o:ssl.termination=false
+        --o:net.proto=IPv4
+        --o:welcome.enable=false
+        --o:net.frame_ancestors=localhost:8065
+      dictionaries: ru_RU en_US
+    cap_add:
+      - MKNOD
+    ports:
+      - "9980:9980"
+
 volumes:
   postgres-data:
   mm-config:

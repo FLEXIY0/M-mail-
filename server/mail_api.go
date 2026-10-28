@@ -194,56 +194,6 @@ func (p *Plugin) handleMessage(w http.ResponseWriter, r *http.Request) {
 	}{msg, p.directory.lookup(p, emails)})
 }
 
-// inlineTypes may be shown in the browser; everything else is downloaded.
-var inlineTypes = map[string]bool{
-	"image/png": true, "image/jpeg": true, "image/gif": true, "image/webp": true,
-	"application/pdf": true, "text/plain": true,
-}
-
-// GET /attachment?folder=…&uid=…&part=…[&inline=1]
-func (p *Plugin) handleAttachment(w http.ResponseWriter, r *http.Request) {
-	folder := folderParam(r)
-	uid, ok := uidParam(r)
-	part := r.URL.Query().Get("part")
-	if !ok || part == "" {
-		writeError(w, http.StatusBadRequest, codeBadRequest, "uid and part are required")
-		return
-	}
-	var meta *mailclient.Attachment
-	var data []byte
-	if !p.mailRequest(w, r, func(ctx context.Context, _ *store.Account, conn *mailclient.IMAP) error {
-		var err error
-		meta, data, err = conn.Download(ctx, folder, uid, part)
-		return err
-	}) {
-		return
-	}
-	contentType := meta.ContentType
-	disposition := "attachment"
-	if r.URL.Query().Get("inline") == "1" && inlineTypes[contentType] {
-		disposition = "inline"
-	}
-	if !inlineTypes[contentType] && !strings.HasPrefix(contentType, "image/") {
-		// Never let the browser render HTML or SVG from a message on the
-		// Mattermost origin.
-		contentType = "application/octet-stream"
-	}
-	if contentType == "image/svg+xml" {
-		contentType = "application/octet-stream"
-		disposition = "attachment"
-	}
-	if contentType == "text/plain" {
-		contentType = "text/plain; charset=utf-8"
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", mime.FormatMediaType(disposition, map[string]string{"filename": meta.Filename}))
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	w.Header().Set("Content-Security-Policy", "sandbox; default-src 'none'")
-	w.Header().Set("Cache-Control", "private, max-age=300")
-	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
-	_, _ = w.Write(data)
-}
-
 type messagesRequest struct {
 	Folder string   `json:"folder"`
 	UIDs   []uint32 `json:"uids"`
@@ -684,6 +634,8 @@ func (p *Plugin) attachMattermostFiles(userID string, out *mailclient.Outgoing, 
 // other servers do not, so the plugin looks first and appends only when
 // the copy is missing.
 func (p *Plugin) afterSend(userID string, account *store.Account, replyTo, draftOf *messageRef, messageID string, raw []byte) {
+	// New recipients show up in the suggestions right away.
+	defer p.forgetContacts(userID)
 	time.Sleep(sentCopyDelay)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()

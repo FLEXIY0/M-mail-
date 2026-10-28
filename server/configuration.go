@@ -46,7 +46,16 @@ type configuration struct {
 	// IconBrowserModeDisabledFor lists users (logins or e-mails) for whom
 	// that mode is off.
 	IconBrowserModeDisabledFor string
-	EncryptionKey              string
+	// CollaboraURL is the address of Collabora Online for viewing office
+	// documents; empty: they are downloaded.
+	CollaboraURL string
+	// CollaboraWOPIURL is the address of Mattermost as Collabora reaches
+	// it, if not the Site URL (e.g. an internal one).
+	CollaboraWOPIURL string
+	// SenderPhotos shows photos of external senders from the avatar
+	// service of Mail.ru (pointer: unset means on).
+	SenderPhotos  *bool
+	EncryptionKey string
 
 	// UpdateSource is "owner/repo" on GitHub (or a release API URL).
 	UpdateSource string
@@ -70,6 +79,14 @@ func (c *configuration) browserModeAllowed(username, email string) bool {
 		}
 	}
 	return true
+}
+
+func (c *configuration) senderPhotos() bool {
+	return c.SenderPhotos == nil || *c.SenderPhotos
+}
+
+func (c *configuration) collaboraURL() string {
+	return strings.TrimRight(strings.TrimSpace(c.CollaboraURL), "/")
 }
 
 func (c *configuration) requireSignature() bool {

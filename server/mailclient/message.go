@@ -40,6 +40,8 @@ type Attachment struct {
 	Size        int64  `json:"size"`
 	Inline      bool   `json:"inline,omitempty"`
 	ContentID   string `json:"content_id,omitempty"`
+	// Charset of a text attachment, for showing it; not sent to the browser.
+	Charset string `json:"-"`
 }
 
 // Message is a message prepared for reading.
@@ -485,7 +487,7 @@ func (m *IMAP) Download(ctx context.Context, folder string, uid uint32, part str
 			if name == "" {
 				name = defaultFilename(single, index)
 			}
-			meta = &Attachment{Part: part, Filename: name, ContentType: single.MediaType(), Size: estimateDecodedSize(single), ContentID: strings.Trim(single.ID, "<>")}
+			meta = &Attachment{Part: part, Filename: name, ContentType: single.MediaType(), Size: estimateDecodedSize(single), ContentID: strings.Trim(single.ID, "<>"), Charset: single.Params["charset"]}
 		}
 		return false
 	})
@@ -494,6 +496,16 @@ func (m *IMAP) Download(ctx context.Context, folder string, uid uint32, part str
 	}
 	if int64(target.Size) > MaxAttachmentBytes*4/3+1024 {
 		return nil, nil, newError(CodeTooLarge, "download", fmt.Errorf("part %s is %d bytes", part, target.Size))
+	}
+	if target.MediaType() == "message/rfc822" && (target.Encoding == "" || strings.EqualFold(target.Encoding, "7bit") || strings.EqualFold(target.Encoding, "8bit") || strings.EqualFold(target.Encoding, "binary")) {
+		// Servers disagree on what BODY[n] of an attached message is: the
+		// whole message or only its body. Header and text asked
+		// separately are the same everywhere.
+		data, rfcErr := m.fetchEmbedded(ctx, uid, path)
+		if rfcErr == nil {
+			meta.Size = int64(len(data))
+			return meta, data, nil
+		}
 	}
 	section := &imap.FetchItemBodySection{Part: path, Peek: true}
 	var body []*imapclient.FetchMessageBuffer
@@ -515,6 +527,33 @@ func (m *IMAP) Download(ctx context.Context, folder string, uid uint32, part str
 	data, _ := decodePart(target, raw, MaxAttachmentBytes)
 	meta.Size = int64(len(data))
 	return meta, data, nil
+}
+
+// fetchEmbedded downloads a message attached to a message.
+func (m *IMAP) fetchEmbedded(ctx context.Context, uid uint32, path []int) ([]byte, error) {
+	header := &imap.FetchItemBodySection{Part: path, Specifier: imap.PartSpecifierHeader, Peek: true}
+	text := &imap.FetchItemBodySection{Part: path, Specifier: imap.PartSpecifierText, Peek: true}
+	bufs, err := m.fetchUIDs(ctx, []imap.UID{imap.UID(uid)}, &imap.FetchOptions{UID: true, BodySection: []*imap.FetchItemBodySection{header, text}})
+	if err != nil {
+		return nil, err
+	}
+	if len(bufs) == 0 {
+		return nil, newError(CodeNotFound, "download", fmt.Errorf("message %d not found", uid))
+	}
+	h := bufs[0].FindBodySection(header)
+	if len(h) == 0 {
+		return nil, newError(CodeNotFound, "download", errors.New("no header of the attached message"))
+	}
+	// The header ends with an empty line; some servers leave it out.
+	out := append([]byte{}, h...)
+	switch {
+	case bytes.HasSuffix(out, []byte("\r\n\r\n")), bytes.HasSuffix(out, []byte("\n\n")):
+	case bytes.HasSuffix(out, []byte("\n")):
+		out = append(out, "\r\n"...)
+	default:
+		out = append(out, "\r\n\r\n"...)
+	}
+	return append(out, bufs[0].FindBodySection(text)...), nil
 }
 
 func decodeTransfer(encoding string, raw []byte) ([]byte, error) {

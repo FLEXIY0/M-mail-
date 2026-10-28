@@ -699,3 +699,22 @@ func TestSendersAndCopy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Len(t, copied.Messages, 1)
 }
+
+func TestRecentEnvelopes(t *testing.T) {
+	s := startIMAP(t, false)
+	s.appendRaw(t, "INBOX", plainCP1251)
+	s.appendRaw(t, "INBOX", multipartMessage)
+	conn := s.dial(t)
+	ctx := context.Background()
+
+	all, err := conn.RecentEnvelopes(ctx, "INBOX", 10)
+	require.NoError(t, err)
+	require.Len(t, all, 2)
+	assert.Equal(t, "anna@example.ru", all[1].From[0].Email)
+
+	last, err := conn.RecentEnvelopes(ctx, "INBOX", 1)
+	require.NoError(t, err)
+	require.Len(t, last, 1, "only the newest")
+	assert.Equal(t, "anna@example.ru", last[0].From[0].Email)
+}
+

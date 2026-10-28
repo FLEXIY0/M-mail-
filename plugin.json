@@ -172,6 +172,35 @@
                 "help_text": "Сотрудник не сможет сохранить настройки почты без подписи, и её нельзя убрать из письма перед отправкой. Подпись можно оформить: цвет, жирный шрифт, ссылки, фото и логотип компании."
             },
             {
+                "key": "SenderPhotos",
+                "display_name": "Фото отправителей из Mail.ru",
+                "type": "bool",
+                "default": true,
+                "help_text": "Для отправителей, которых нет в Mattermost, показывать фото из сервиса аватаров Mail.ru (filin.mail.ru) — так же, как в Почте Mail.ru и VK WorkSpace. Запросы идут с сервера Mattermost и кешируются; сотрудники и их браузеры к Mail.ru не обращаются. Выключите, если сервер не должен ходить в интернет."
+            },
+            {
+                "key": "CollaboraURL",
+                "display_name": "Адрес Collabora Online",
+                "type": "text",
+                "default": "",
+                "placeholder": "https://collabora.company.ru",
+                "help_text": "Для просмотра Word, Excel, PowerPoint и других документов прямо в Mattermost. Пусто — документы скачиваются. Картинки, PDF, видео, текст, архивы и вложенные письма показываются и без Collabora. Collabora должна доверять адресу Mattermost — проверьте кнопкой ниже после сохранения."
+            },
+            {
+                "key": "CollaboraWOPIURL",
+                "display_name": "Адрес Mattermost для Collabora (необязательно)",
+                "type": "text",
+                "default": "",
+                "placeholder": "Site URL Mattermost",
+                "help_text": "Если Collabora должна забирать файлы по другому адресу Mattermost (например, внутреннему), впишите его. Пусто — используется Site URL."
+            },
+            {
+                "key": "CollaboraCheck",
+                "display_name": "Проверка Collabora",
+                "type": "custom",
+                "help_text": ""
+            },
+            {
                 "key": "HelpText",
                 "display_name": "Подсказка в мастере",
                 "type": "longtext",

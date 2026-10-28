@@ -1,10 +1,10 @@
 import React from 'react';
 
+import {PersonAvatar} from './avatar';
 import {CloseIcon, Spinner} from './icons';
 
 import {api} from '../api';
-import {avatarColor, initials} from '../format';
-import type {MattermostUser} from '../types';
+import type {Contact, MattermostUser} from '../types';
 
 // A recipient chosen in the composer: a Mattermost user (their e-mail is
 // resolved on the server) or a plain e-mail address.
@@ -31,9 +31,54 @@ export function participantFromEmail(email: string, name = ''): Participant {
     return {key: `e:${clean}`, email: clean, label: name || clean, sublabel: name ? clean : undefined};
 }
 
-function avatarUrl(userId: string) {
-    return `${window.basename || ''}/api/v4/users/${userId}/image`;
+// The address book from the mail history is loaded once per few minutes
+// and filtered in the browser, so suggestions appear while typing.
+const CONTACTS_TTL = 5 * 60 * 1000;
+let contactsCache: {at: number; list: Promise<Contact[]>} | null = null;
+
+export function loadContacts(): Promise<Contact[]> {
+    if (!contactsCache || Date.now() - contactsCache.at > CONTACTS_TTL) {
+        const list = api.contacts().then((r) => r.contacts).catch(() => {
+            contactsCache = null;
+            return [] as Contact[];
+        });
+        contactsCache = {at: Date.now(), list};
+    }
+    return contactsCache.list;
 }
+
+export function forgetContacts() {
+    contactsCache = null;
+}
+
+// matchContact finds people by any part of the name or the address.
+export function matchContact(c: Contact, term: string) {
+    const t = term.trim().toLowerCase();
+    if (!t) {
+        return true;
+    }
+    return c.email.includes(t) || (c.name || '').toLowerCase().split(/\s+/).some((w) => w.startsWith(t)) || (c.name || '').toLowerCase().includes(t);
+}
+
+interface Suggestion {
+    key: string;
+    group: 'history' | 'mattermost';
+    label: string;
+    sub: string;
+    email?: string;
+    userId?: string;
+    participant: Participant;
+}
+
+function groupTitle(group: Suggestion['group'], typing: boolean) {
+    if (group === 'mattermost') {
+        return 'В Mattermost';
+    }
+    return typing ? 'Из переписки' : 'Часто пишете';
+}
+
+const MAX_HISTORY = 6;
+const MAX_USERS = 6;
 
 export default function RecipientPicker({value, onChange, disabled, autoFocus, placeholder = 'Имя коллеги или адрес почты'}: {
     value: Participant[];
@@ -44,6 +89,7 @@ export default function RecipientPicker({value, onChange, disabled, autoFocus, p
 }) {
     const [text, setText] = React.useState('');
     const [results, setResults] = React.useState<MattermostUser[]>([]);
+    const [contacts, setContacts] = React.useState<Contact[]>([]);
     const [searching, setSearching] = React.useState(false);
     const [active, setActive] = React.useState(0);
     const [open, setOpen] = React.useState(false);
@@ -53,6 +99,7 @@ export default function RecipientPicker({value, onChange, disabled, autoFocus, p
         if (autoFocus) {
             inputRef.current?.focus();
         }
+        loadContacts().then(setContacts);
     }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
     React.useEffect(() => {
@@ -105,7 +152,33 @@ export default function RecipientPicker({value, onChange, disabled, autoFocus, p
         return true;
     };
 
-    const suggestions = results.filter((u) => !value.some((v) => v.userId === u.id));
+    const chosen = new Set(value.map((v) => v.email || v.userId));
+    const history: Suggestion[] = contacts.
+        filter((c) => !chosen.has(c.email) && matchContact(c, text)).
+        slice(0, text.trim() ? MAX_HISTORY : 5).
+        map((c) => ({
+            key: `h:${c.email}`,
+            group: 'history',
+            label: c.name || c.email,
+            sub: c.name ? c.email : '',
+            email: c.email,
+            userId: c.user_id,
+            participant: participantFromEmail(c.email, c.name),
+        }));
+    const inHistory = new Set(history.map((h) => h.userId).filter(Boolean));
+    const people: Suggestion[] = results.
+        filter((u) => !value.some((v) => v.userId === u.id) && !inHistory.has(u.id)).
+        slice(0, MAX_USERS).
+        map((u) => ({
+            key: `u:${u.id}`,
+            group: 'mattermost',
+            label: u.display_name || u.username,
+            sub: u.email || `@${u.username}`,
+            email: u.email,
+            userId: u.id,
+            participant: participantFromUser(u),
+        }));
+    const suggestions = [...history, ...people];
     const typedEmail = isEmail(text) ? text.trim() : '';
 
     const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -118,7 +191,7 @@ export default function RecipientPicker({value, onChange, disabled, autoFocus, p
         } else if (e.key === 'Enter' || e.key === ',' || e.key === ';') {
             if (suggestions[active] && e.key === 'Enter') {
                 e.preventDefault();
-                add(participantFromUser(suggestions[active]));
+                add(suggestions[active].participant);
             } else if (text.trim() && addEmails(text)) {
                 e.preventDefault();
             } else if (e.key === 'Enter') {
@@ -141,20 +214,13 @@ export default function RecipientPicker({value, onChange, disabled, autoFocus, p
                         className='mml-picker__chip'
                         title={p.sublabel || p.email}
                     >
-                        {p.userId ? (
-                            <img
-                                className='mml-avatar'
-                                src={avatarUrl(p.userId)}
-                                alt=''
-                            />
-                        ) : (
-                            <span
-                                className='mml-avatar mml-avatar--initials'
-                                style={{background: avatarColor({email: p.email || ''})}}
-                            >
-                                {initials({email: p.email || '', name: p.sublabel ? p.label : undefined})}
-                            </span>
-                        )}
+                        <PersonAvatar
+                            email={p.email || ''}
+                            name={p.sublabel ? p.label : undefined}
+                            userId={p.userId}
+                            size={20}
+                            className='mml-avatar'
+                        />
                         {p.label}
                         <button
                             type='button'
@@ -201,29 +267,38 @@ export default function RecipientPicker({value, onChange, disabled, autoFocus, p
                     className='mml-picker__menu'
                     role='listbox'
                 >
-                    {suggestions.map((u, i) => (
-                        <li
-                            key={u.id}
-                            role='option'
-                            aria-selected={i === active}
-                            className={i === active ? 'mml-picker__option--active' : ''}
-                            onMouseDown={(e) => {
-                                e.preventDefault();
-                                add(participantFromUser(u));
-                            }}
-                            onMouseEnter={() => setActive(i)}
-                        >
-                            <img
-                                className='mml-avatar mml-avatar--lg'
-                                src={avatarUrl(u.id)}
-                                alt=''
-                            />
-                            <span className='mml-picker__name'>{u.display_name}</span>
-                            <span className='mml-muted'>{`@${u.username}`}</span>
-                            {u.email && <span className='mml-muted mml-small mml-picker__email'>{u.email}</span>}
-                        </li>
+                    {suggestions.map((sg, i) => (
+                        <React.Fragment key={sg.key}>
+                            {(i === 0 || suggestions[i - 1].group !== sg.group) && (
+                                <li
+                                    className='mml-picker__group'
+                                    role='presentation'
+                                >
+                                    {groupTitle(sg.group, Boolean(text.trim()))}
+                                </li>
+                            )}
+                            <li
+                                role='option'
+                                aria-selected={i === active}
+                                className={i === active ? 'mml-picker__option--active' : ''}
+                                onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    add(sg.participant);
+                                }}
+                                onMouseEnter={() => setActive(i)}
+                            >
+                                <PersonAvatar
+                                    email={sg.email || ''}
+                                    name={sg.label}
+                                    userId={sg.userId}
+                                    size={28}
+                                />
+                                <span className='mml-picker__name'>{sg.label}</span>
+                                {sg.sub && <span className='mml-muted mml-small mml-picker__email'>{sg.sub}</span>}
+                            </li>
+                        </React.Fragment>
                     ))}
-                    {typedEmail && !suggestions.some((u) => u.email === typedEmail.toLowerCase()) && (
+                    {typedEmail && !suggestions.some((sg) => sg.email === typedEmail.toLowerCase()) && (
                         <li
                             role='option'
                             aria-selected={suggestions.length === 0}

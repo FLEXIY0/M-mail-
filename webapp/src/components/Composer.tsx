@@ -3,7 +3,7 @@ import React from 'react';
 import {CloseIcon, PaperclipIcon, PenIcon, SendIcon, Spinner, TrashIcon} from './icons';
 import {SignatureCard} from './MailSettings';
 import {HtmlFrame} from './MessageView';
-import RecipientPicker, {participantFromEmail} from './RecipientPicker';
+import RecipientPicker, {forgetContacts, participantFromEmail} from './RecipientPicker';
 import type {Participant} from './RecipientPicker';
 import {ErrorCard} from './shared';
 import {Callout, PanelPage} from './ui';
@@ -73,6 +73,7 @@ function scheduleSend(request: ComposeRequest, req: SendRequest) {
         try {
             await api.send(req);
             drafts.delete(id);
+            forgetContacts();
             showToast('Письмо отправлено');
             mailChanged();
         } catch (e) {

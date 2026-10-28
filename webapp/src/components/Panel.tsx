@@ -1,5 +1,7 @@
 import React from 'react';
 
+import AttachmentViewer from './AttachmentViewer';
+import {PersonAvatar} from './avatar';
 import Composer from './Composer';
 import {
     ArchiveIcon, ArrowLeftIcon, BellIcon, BookmarkIcon, CheckAllIcon, CheckIcon, CloseIcon, DraftIcon, ExternalIcon,
@@ -19,7 +21,7 @@ import WizardRoot from './Wizard';
 
 import type {ApiError} from '../api';
 import {api} from '../api';
-import {addressLabel, avatarColor, dateGroup, formatListDate, initials, pluralMessages} from '../format';
+import {addressLabel, dateGroup, formatListDate, pluralMessages} from '../format';
 import {guides} from '../guides';
 import {
     closePanel, hideToast, loadAll, mailChanged, openCompose, openInBrowser, openRule, openRules, openWizard, pushRoute, refreshMe,
@@ -72,32 +74,16 @@ export function FolderGlyph({role, size = 16}: {role?: FolderRole; size?: number
     return <FolderIcon size={size}/>;
 }
 
-function avatarUrl(userId: string) {
-    return `${window.basename || ''}/api/v4/users/${userId}/image`;
-}
-
-// Avatar shows the photo of a colleague from Mattermost, or the initials.
+// Avatar shows the photo of a colleague from Mattermost, of an external
+// sender from Mail.ru, or the initials.
 export function Avatar({address, avatars, size = 40}: {address?: Address; avatars: Record<string, string>; size?: number}) {
-    const userId = address ? avatars[address.email.toLowerCase()] : '';
-    const style = {width: size, height: size, fontSize: Math.round(size * 0.36)};
-    if (userId) {
-        return (
-            <img
-                className='mml-avatar-img'
-                src={avatarUrl(userId)}
-                alt=''
-                style={style}
-            />
-        );
-    }
     return (
-        <span
-            className='mml-message__avatar'
-            style={{...style, background: avatarColor(address)}}
-            aria-hidden='true'
-        >
-            {initials(address)}
-        </span>
+        <PersonAvatar
+            email={address?.email || ''}
+            name={address?.name}
+            userId={address ? avatars[address.email.toLowerCase()] : undefined}
+            size={size}
+        />
     );
 }
 
@@ -158,6 +144,13 @@ function RouteScreen({route, me}: {route: Route; me: Me}) {
         return <RulesPage/>;
     case 'signature':
         return <SignatureEditor/>;
+    case 'attachment':
+        return (
+            <AttachmentViewer
+                attRef={route.ref}
+                list={route.list}
+            />
+        );
     case 'rule':
         return <RuleEditor draft={route.rule}/>;
     case 'message':
@@ -229,7 +222,7 @@ export default function Panel() {
             </div>
             {visible.map((route, i) => (
                 <div
-                    key={route.name === 'compose' ? route.request.id : `${route.name}-${i}`}
+                    key={route.name === 'compose' ? route.request.id : `${route.name}-${i}${route.name === 'attachment' ? `-${route.ref.part}-${route.ref.sub || 0}` : ''}`}
                     className={`mml-shell__screen ${i === visible.length - 1 ? '' : 'mml-hidden'}`}
                 >
                     <RouteScreen

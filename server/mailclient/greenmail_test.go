@@ -69,4 +69,26 @@ func TestGreenMail(t *testing.T) {
 	folders, err := conn.Folders(ctx)
 	require.NoError(t, err)
 	assert.Equal(t, RoleInbox, folders[0].Role)
+
+	// A forwarded message as an attachment: its headers must come along
+	// (GreenMail answers BODY[n] with the body only).
+	fwd := "From: Anna <anna@example.ru>\r\nTo: ivan@example.ru\r\nSubject: Fwd " + subject + "\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=out\r\n\r\n" +
+		"--out\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nсм. вложение\r\n" +
+		"--out\r\nContent-Type: message/rfc822\r\nContent-Disposition: attachment; filename=\"orig.eml\"\r\n\r\n" +
+		embeddedMessage + "--out--\r\n"
+	require.NoError(t, Send(ctx, smtpEndpoint, anna, policy, anna.Username, []string{ivan.Username}, []byte(fwd)))
+	fresh = nil
+	for i := 0; i < 20 && len(fresh) == 0; i++ {
+		time.Sleep(200 * time.Millisecond)
+		fresh, err = conn.NewSince(ctx, "INBOX", before.UIDNext+1, 5)
+		require.NoError(t, err)
+	}
+	require.NotEmpty(t, fresh)
+	_, data, err = conn.Download(ctx, "INBOX", fresh[0].UID, "2")
+	require.NoError(t, err)
+	embedded, err := ParseEmbedded(data)
+	require.NoError(t, err)
+	assert.Equal(t, "Смета", embedded.Subject)
+	assert.Equal(t, "Привет", embedded.Text)
 }

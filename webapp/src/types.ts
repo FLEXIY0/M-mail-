@@ -45,6 +45,12 @@ export interface PluginConfig {
     max_attachment_bytes: number;
     require_signature: boolean;
 
+    // Collabora Online is configured: office documents open in the panel.
+    office_viewer: boolean;
+
+    // Photos of external senders come from the avatar service of Mail.ru.
+    sender_photos: boolean;
+
     // The job title from the Mattermost profile, for the signature template.
     position?: string;
 }
@@ -239,4 +245,71 @@ export interface SortRuleInput {
     folder: string;
     keep_in_inbox: boolean;
     apply_existing: boolean;
+}
+
+export interface ZipEntry {
+    index: number;
+    name: string;
+    size: number;
+    dir?: boolean;
+    modified: string;
+}
+
+export interface EmbeddedMessage {
+    subject: string;
+    from: Address[];
+    to: Address[];
+    cc: Address[];
+    date: string;
+    text: string;
+    html?: string;
+    attachments: Attachment[];
+}
+
+// AttachmentView is what /attachment/view says about a file.
+export interface AttachmentView {
+    kind: 'text' | 'zip' | 'eml' | 'file';
+    filename: string;
+    content_type: string;
+    size: number;
+    text?: string;
+    truncated?: boolean;
+    entries?: ZipEntry[];
+    more?: boolean;
+    message?: EmbeddedMessage;
+    office?: boolean;
+}
+
+// AttachmentRef points to an attachment, or to a file inside a message
+// attached to it (sub).
+export interface AttachmentRef {
+    folder: string;
+    uid: number;
+    part: string;
+    sub?: number;
+}
+
+export interface OfficeSession {
+    action_url: string;
+    access_token: string;
+    access_token_ttl: number;
+    filename: string;
+}
+
+export interface CollaboraCheck {
+    collabora_url: string;
+    wopi_url: string;
+    steps: Array<{title: string; ok: boolean; text: string; warn?: boolean; detail?: string}>;
+    alias_line?: string;
+    xml?: string;
+}
+
+// Contact is someone from the mail history, for suggestions.
+export interface Contact {
+    email: string;
+    name?: string;
+    user_id?: string;
+    sent: number;
+    received: number;
+    last: string;
 }

@@ -5,6 +5,7 @@ import type {GlobalState} from '@mattermost/types/store';
 
 import manifest from 'manifest';
 
+import CollaboraCheck from './components/CollaboraCheck';
 import {MailIcon} from './components/icons';
 import Panel, {PanelTitle} from './components/Panel';
 import UpdatePanel from './components/UpdatePanel';
@@ -25,8 +26,10 @@ interface RHSHandles {
 
 const TOOLTIP = 'Почта';
 
+// The version in the address makes browsers and the desktop app load the
+// icon again after an update instead of showing the cached old one.
 function iconUrl() {
-    return `${window.basename || ''}/plugins/${manifest.id}/public/app-bar-icon.svg`;
+    return `${window.basename || ''}/plugins/${manifest.id}/public/app-bar-icon.svg?v=${encodeURIComponent(manifest.version)}`;
 }
 
 // registerPanel puts the mail icon into the App Bar (the right-hand icon
@@ -114,6 +117,7 @@ export default class Plugin {
 
         if (typeof registry.registerAdminConsoleCustomSetting === 'function') {
             registry.registerAdminConsoleCustomSetting('UpdatePanel', UpdatePanel, {showTitle: true});
+            registry.registerAdminConsoleCustomSetting('CollaboraCheck', CollaboraCheck, {showTitle: true});
         }
 
         // "Send by e-mail" in the message menu. The item is shown to
