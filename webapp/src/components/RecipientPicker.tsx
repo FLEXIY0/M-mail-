@@ -51,13 +51,16 @@ export function forgetContacts() {
     contactsCache = null;
 }
 
-// matchContact finds people by any part of the name or the address.
+// matchContact finds people by the beginning of any word of the name or
+// of the address ("пет" finds Ольга Петрова and petrova@…), and anywhere
+// in the address once enough is typed.
 export function matchContact(c: Contact, term: string) {
     const t = term.trim().toLowerCase();
     if (!t) {
         return true;
     }
-    return c.email.includes(t) || (c.name || '').toLowerCase().split(/\s+/).some((w) => w.startsWith(t)) || (c.name || '').toLowerCase().includes(t);
+    const words = [...(c.name || '').toLowerCase().split(/[\s.,"'()-]+/), ...c.email.split(/[@._-]+/)];
+    return words.some((w) => w.startsWith(t)) || c.email.startsWith(t) || (t.length >= 3 && c.email.includes(t));
 }
 
 interface Suggestion {

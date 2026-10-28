@@ -257,6 +257,16 @@ endif
 ifneq ($(HAS_PUBLIC),)
 	cp -r public dist/$(PLUGIN_ID)/
 endif
+ifneq ($(HAS_WEBAPP),)
+	# pdf.js renders PDF attachments; the panel loads it only when a PDF is
+	# opened. Copied as .js: Mattermost serves .mjs with a type browsers
+	# refuse for modules on some servers.
+	mkdir -p dist/$(PLUGIN_ID)/public/pdfjs/standard_fonts
+	cp webapp/node_modules/pdfjs-dist/legacy/build/pdf.min.mjs dist/$(PLUGIN_ID)/public/pdfjs/pdf.min.js
+	cp webapp/node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs dist/$(PLUGIN_ID)/public/pdfjs/pdf.worker.min.js
+	cp webapp/node_modules/pdfjs-dist/standard_fonts/* dist/$(PLUGIN_ID)/public/pdfjs/standard_fonts/
+	cp webapp/node_modules/pdfjs-dist/LICENSE dist/$(PLUGIN_ID)/public/pdfjs/LICENSE
+endif
 ifneq ($(HAS_SERVER),)
 	mkdir -p dist/$(PLUGIN_ID)/server
 	cp -r server/dist dist/$(PLUGIN_ID)/server/

@@ -2,6 +2,7 @@ import React from 'react';
 
 import {ChevronLeft, ChevronRight, DownloadIcon, ExternalIcon, FolderIcon, PaperclipIcon, Spinner} from './icons';
 import {HtmlFrame} from './MessageView';
+import PdfView from './PdfView';
 import {ErrorCard} from './shared';
 import {PanelPage} from './ui';
 
@@ -169,11 +170,16 @@ export default function AttachmentViewer({attRef, list}: {attRef: AttachmentRef;
                 )}
                 {kind === 'pdf' && (
                     <>
-                        <iframe
+                        <PdfView
                             key={fileUrl(attRef)}
-                            className='mml-viewer__frame'
-                            src={fileUrl(attRef, true)}
-                            title={filename}
+                            url={fileUrl(attRef)}
+                            onFallback={() => (
+                                <iframe
+                                    className='mml-viewer__frame'
+                                    src={fileUrl(attRef, true)}
+                                    title={filename}
+                                />
+                            )}
                         />
                         <div className='mml-viewer__links'>
                             <button

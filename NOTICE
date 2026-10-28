@@ -14,3 +14,8 @@ Copyright Mattermost, Inc., licensed under the Apache License, Version 2.0.
 
 IMAP, SMTP and MIME support: go-imap, go-smtp, go-message and go-sasl by
 Simon Ser and contributors (MIT License).
+
+PDF attachments are shown with PDF.js by Mozilla (Apache License, Version
+2.0), shipped as separate files in public/pdfjs and loaded on demand.
+The IMAP client is a patched copy of go-imap v2 (MIT License), see
+third_party/go-imap/PATCHES.md.

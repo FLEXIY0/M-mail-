@@ -2890,3 +2890,30 @@ button.mml-attachment { width: 100%; border: none; text-align: left; cursor: poi
     cursor: default !important;
     background: none !important;
 }
+
+.mml-pdf {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    overflow: auto;
+    padding: 0 12px 12px;
+    background: fg(0.06);
+
+    &__page { flex: none; background: #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2); }
+
+    &__zoom {
+        position: sticky;
+        top: 0;
+        z-index: 2;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        align-self: stretch;
+        justify-content: center;
+        padding: 6px;
+        background: $bg;
+        border-bottom: 1px solid fg(0.08);
+    }
+}
