@@ -19,7 +19,7 @@ const manifestStr = `
   "homepage_url": "https://github.com/FLEXIY0/M-mail-",
   "support_url": "https://github.com/FLEXIY0/M-mail-/issues",
   "icon_path": "assets/icon.svg",
-  "version": "0.0.0+f215b4a",
+  "version": "0.0.0+41f30c9",
   "min_server_version": "9.0.0",
   "server": {
     "executables": {
