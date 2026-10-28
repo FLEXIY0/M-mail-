@@ -29,7 +29,18 @@ export type Route =
     | {name: 'settings'}
     | {name: 'icon'}
     | {name: 'wizard'; mode: WizardMode}
-    | {name: 'share'; ref: MessageRef};
+    | {name: 'share'; ref: MessageRef}
+    | {name: 'rules'}
+    | {name: 'rule'; rule: SortRuleDraft};
+
+// SortRuleDraft opens the rule editor: a new rule, prefilled e.g. with the
+// sender of a message, or an existing one (id).
+export interface SortRuleDraft {
+    id?: string;
+    from?: string;
+    folder?: string;
+    keepInInbox?: boolean;
+}
 
 export interface State {
     me: Me | null;
@@ -142,6 +153,8 @@ export function pushRoute(route: Route) {
         case 'compose':
             // Several drafts can be open: each keeps its place in the stack.
             return (r as typeof route).request.id === route.request.id;
+        case 'rule':
+            return false;
         }
         return true;
     };
@@ -255,4 +268,18 @@ export function hideToast(id?: number) {
     if (id === undefined || state.toast?.id === id) {
         setState({toast: null});
     }
+}
+
+export function openRules() {
+    pushRoute({name: 'rules'});
+}
+
+// openRule opens the editor of a sorting rule on top of the panel.
+export function openRule(rule: SortRuleDraft = {}) {
+    setState({routes: [...state.routes.filter((r) => r.name !== 'rule'), {name: 'rule', rule}]});
+    showPanel();
+}
+
+export function closeRule() {
+    popWhile(['rule']);
 }

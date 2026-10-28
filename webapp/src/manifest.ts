@@ -8,7 +8,7 @@ const manifest = JSON.parse(`
     "homepage_url": "https://github.com/FLEXIY0/M-mail-",
     "support_url": "https://github.com/FLEXIY0/M-mail-/issues",
     "icon_path": "assets/icon.svg",
-    "version": "0.0.0+12803a4",
+    "version": "0.0.0+f215b4a",
     "min_server_version": "9.0.0",
     "server": {
         "executables": {

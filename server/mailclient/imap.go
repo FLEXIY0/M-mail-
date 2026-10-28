@@ -874,3 +874,82 @@ func (m *IMAP) AppendDraft(ctx context.Context, folder string, raw []byte) (uint
 	})
 	return uid, err
 }
+
+// Sender is the author of a message, for sorting rules.
+type Sender struct {
+	UID  uint32
+	From []Address
+}
+
+// SendersSince returns the authors of messages with UID >= since, oldest
+// first, at most limit of them: the new mail sorting rules look at.
+func (m *IMAP) SendersSince(ctx context.Context, folder string, since uint32, limit int) ([]Sender, error) {
+	return m.senders(ctx, folder, &imap.SearchCriteria{
+		UID: []imap.UIDSet{{imap.UIDRange{Start: imap.UID(since), Stop: 0}}},
+	}, since, limit)
+}
+
+// SendersFrom returns messages whose From contains text, oldest first. The
+// server matches substrings, so callers check the addresses themselves.
+func (m *IMAP) SendersFrom(ctx context.Context, folder, text string, limit int) ([]Sender, error) {
+	return m.senders(ctx, folder, &imap.SearchCriteria{
+		Header: []imap.SearchCriteriaHeaderField{{Key: "From", Value: text}},
+	}, 0, limit)
+}
+
+func (m *IMAP) senders(ctx context.Context, folder string, criteria *imap.SearchCriteria, since uint32, limit int) ([]Sender, error) {
+	if _, err := m.selectFolder(ctx, folder, true); err != nil {
+		return nil, err
+	}
+	var data *imap.SearchData
+	err := m.do(ctx, "search", func() error {
+		var err error
+		data, err = m.client.UIDSearch(criteria, nil).Wait()
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	var uids []imap.UID
+	for _, uid := range data.AllUIDs() {
+		// "N:*" always matches the last message, even when it is older.
+		if uint32(uid) >= since {
+			uids = append(uids, uid)
+		}
+	}
+	sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
+	if len(uids) > limit {
+		uids = uids[:limit]
+	}
+	if len(uids) == 0 {
+		return nil, nil
+	}
+	bufs, err := m.fetchUIDs(ctx, uids, &imap.FetchOptions{UID: true, Envelope: true})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(bufs, func(i, j int) bool { return bufs[i].UID < bufs[j].UID })
+	out := make([]Sender, 0, len(bufs))
+	for _, buf := range bufs {
+		s := Sender{UID: uint32(buf.UID)}
+		if buf.Envelope != nil {
+			s.From = convertAddresses(buf.Envelope.From)
+		}
+		out = append(out, s)
+	}
+	return out, nil
+}
+
+// Copy copies messages to another folder; the originals stay.
+func (m *IMAP) Copy(ctx context.Context, folder string, uids []uint32, to string) error {
+	if folder == to {
+		return nil
+	}
+	if err := m.ensureSelected(ctx, folder, false); err != nil {
+		return err
+	}
+	return m.do(ctx, "copy", func() error {
+		_, err := m.client.Copy(toUIDSet(uids), to).Wait()
+		return err
+	})
+}

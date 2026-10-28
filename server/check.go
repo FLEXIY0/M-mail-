@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ const (
 	maxNotifications  = 5
 	maxPreviewRunes   = 300
 	notificationColor = "#005ff9"
+	checkSoonInterval = 15 * time.Second
 
 	wsMailUpdated = "mail_updated"
 	wsOpenWizard  = "open_wizard"
@@ -88,6 +90,16 @@ func (p *Plugin) checkLater(userID string) {
 	}()
 }
 
+// checkSoon checks Inbox when the user looks at it, so that sorting rules
+// and counters do not wait for the next background run.
+func (p *Plugin) checkSoon(userID string) {
+	state, err := p.store.GetSyncState(userID)
+	if err != nil || state.AuthFailed || time.Since(state.LastAttempt) < checkSoonInterval {
+		return
+	}
+	p.checkLater(userID)
+}
+
 // checkUser asks the server for the Inbox counters and notifies the user
 // about messages that arrived since the previous check. manual checks also
 // retry after an authentication failure.
@@ -110,8 +122,15 @@ func (p *Plugin) checkUser(ctx context.Context, userID string, manual bool) erro
 	previousUnseen := state.Unseen
 	state.LastAttempt = time.Now()
 
+	rules, err := p.store.GetRules(userID)
+	if err != nil {
+		return err
+	}
+	rulesBefore := slices.Clone(rules)
+
 	var status *mailclient.InboxStatus
 	var fresh []mailclient.Summary
+	var sorted int
 	previews := map[uint32]string{}
 	keep := manual || p.sessions.has(userID)
 	err = p.withIMAP(ctx, userID, account, keep, func(conn *mailclient.IMAP) error {
@@ -121,7 +140,26 @@ func (p *Plugin) checkUser(ctx context.Context, userID string, manual bool) erro
 			return err
 		}
 		baseline := state.UIDNext == 0 || state.UIDValidity != status.UIDValidity
-		if baseline || status.UIDNext <= state.UIDNext || !account.Settings.NotifyNew {
+		if baseline || status.UIDNext <= state.UIDNext {
+			return nil
+		}
+
+		// Sorting rules go first: a message moved to its folder does not
+		// trigger a notification, a copied one stays in Inbox and does.
+		if len(rules) > 0 {
+			senders, err := conn.SendersSince(ctx, "INBOX", state.UIDNext, maxRuleBatch)
+			if err != nil {
+				return err
+			}
+			var moved int
+			moved, sorted = applyRules(ctx, conn, rules, senders)
+			if moved > 0 {
+				if status, err = conn.Status(ctx, "INBOX"); err != nil {
+					return err
+				}
+			}
+		}
+		if !account.Settings.NotifyNew {
 			return nil
 		}
 		fresh, err = conn.NewSince(ctx, "INBOX", state.UIDNext, maxNotifications+1)
@@ -170,10 +208,16 @@ func (p *Plugin) checkUser(ctx context.Context, userID string, manual bool) erro
 	if err = p.store.SaveSyncState(userID, state); err != nil {
 		return err
 	}
+	if !slices.Equal(rules, rulesBefore) {
+		// Counters and errors of the rules changed.
+		if err = p.store.SaveRules(userID, rules); err != nil {
+			return err
+		}
+	}
 	if len(fresh) > 0 {
 		p.notifyNewMail(userID, fresh, previews)
 	}
-	if len(fresh) > 0 || previousUnseen != state.Unseen || manual {
+	if len(fresh) > 0 || sorted > 0 || previousUnseen != state.Unseen || manual {
 		p.publish(userID, wsMailUpdated, map[string]any{"unseen": state.Unseen, "new": len(fresh)})
 	}
 	return nil
@@ -196,6 +240,26 @@ func (p *Plugin) markAuthFailed(userID string, cause error) {
 	}
 	if notify {
 		p.notifyAuthFailed(userID, state.ErrorCode)
+	}
+	p.publish(userID, wsMailUpdated, nil)
+}
+
+// authWorks resumes background checks after the server accepted the
+// stored password again: the earlier rejection may have been a hiccup of
+// the server, not a revoked password.
+func (p *Plugin) authWorks(userID string) {
+	state, err := p.store.GetSyncState(userID)
+	if err != nil || !state.AuthFailed {
+		return
+	}
+	notified := state.AuthFailedNotified
+	state.AuthFailed, state.AuthFailedNotified = false, false
+	state.ErrorCode, state.ErrorText = "", ""
+	if err = p.store.SaveSyncState(userID, state); err != nil {
+		return
+	}
+	if notified {
+		p.sendDM(userID, ":white_check_mark: Почта снова пускает плагин — проверяю новые письма, как раньше.")
 	}
 	p.publish(userID, wsMailUpdated, nil)
 }

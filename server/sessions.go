@@ -187,6 +187,7 @@ func (p *Plugin) withIMAP(ctx context.Context, userID string, account *store.Acc
 		}
 		conn.SetPreviewCache(s.previews)
 		s.conn, s.key, fresh = conn, key, true
+		p.authWorks(userID)
 		return nil
 	}
 	if s.conn == nil {

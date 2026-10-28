@@ -8,7 +8,7 @@ import {Button, Callout, PanelPage} from './ui';
 
 import type {ApiError} from '../api';
 import {api} from '../api';
-import {closeWizard, getState, openWizard, setState, useStore} from '../state';
+import {closeWizard, getState, openRules, openWizard, setState, useStore} from '../state';
 import type {Settings} from '../types';
 
 export default function SettingsDialog() {
@@ -128,6 +128,19 @@ export default function SettingsDialog() {
                     botUsername={config.bot_username}
                     signatureImage={true}
                 />
+            </section>
+
+            <section className='mml-section'>
+                <h4 className='mml-section__title'>{'Сортировка писем'}</h4>
+                <div className='mml-account'>
+                    <div className='mml-muted'>{'Письма от выбранных адресов сразу попадают в нужную папку — с копией во «Входящих» или без.'}</div>
+                    <Button
+                        size='sm'
+                        onClick={openRules}
+                    >
+                        {'Правила'}
+                    </Button>
+                </div>
             </section>
 
             <section className='mml-section'>

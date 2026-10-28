@@ -85,17 +85,18 @@ func (p *Plugin) writeFolderError(w http.ResponseWriter, err error) {
 	writeMailError(w, err)
 }
 
-// folderOp decodes the request and runs fn on the user's connection.
-func (p *Plugin) folderOp(w http.ResponseWriter, r *http.Request, fn func(ctx context.Context, conn *mailclient.IMAP, req *folderRequest) (map[string]any, error)) {
+// folderOp decodes the request and runs fn on the user's connection. It
+// reports whether fn succeeded, after the connection is released.
+func (p *Plugin) folderOp(w http.ResponseWriter, r *http.Request, fn func(ctx context.Context, conn *mailclient.IMAP, req *folderRequest) (map[string]any, error)) bool {
 	userID := userIDFrom(r)
 	var req folderRequest
 	if err := decodeBody(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, codeBadRequest, err.Error())
-		return
+		return false
 	}
 	account := p.accountFor(w, userID)
 	if account == nil {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer cancel()
@@ -107,7 +108,7 @@ func (p *Plugin) folderOp(w http.ResponseWriter, r *http.Request, fn func(ctx co
 	})
 	if err != nil {
 		p.writeFolderError(w, err)
-		return
+		return false
 	}
 	if result == nil {
 		result = map[string]any{}
@@ -115,6 +116,7 @@ func (p *Plugin) folderOp(w http.ResponseWriter, r *http.Request, fn func(ctx co
 	result["ok"] = true
 	p.publish(userID, wsMailUpdated, nil)
 	writeJSON(w, http.StatusOK, result)
+	return true
 }
 
 // POST /folders/create {name, parent}
@@ -131,7 +133,8 @@ func (p *Plugin) handleCreateFolder(w http.ResponseWriter, r *http.Request) {
 
 // POST /folders/rename {name, new_name}
 func (p *Plugin) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
-	p.folderOp(w, r, func(ctx context.Context, conn *mailclient.IMAP, req *folderRequest) (map[string]any, error) {
+	var oldName, newName, delim string
+	ok := p.folderOp(w, r, func(ctx context.Context, conn *mailclient.IMAP, req *folderRequest) (map[string]any, error) {
 		name, err := cleanFolderName(req.NewName)
 		if err != nil {
 			return nil, &mailclient.Error{Code: mailclient.CodeInvalidServer, Op: "rename", Err: err}
@@ -139,19 +142,36 @@ func (p *Plugin) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		if err = userFolder(ctx, conn, req.Name); err != nil {
 			return nil, err
 		}
-		full, err := conn.RenameFolder(ctx, req.Name, name)
-		return map[string]any{"name": full}, err
+		if delim, err = conn.Delimiter(ctx); err != nil {
+			return nil, err
+		}
+		oldName = req.Name
+		newName, err = conn.RenameFolder(ctx, req.Name, name)
+		return map[string]any{"name": newName}, err
 	})
+	if ok {
+		// Sorting rules follow the folder to its new name.
+		p.folderRenamed(userIDFrom(r), oldName, newName, delim)
+	}
 }
 
 // POST /folders/delete {name}
 func (p *Plugin) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
-	p.folderOp(w, r, func(ctx context.Context, conn *mailclient.IMAP, req *folderRequest) (map[string]any, error) {
+	var name, delim string
+	ok := p.folderOp(w, r, func(ctx context.Context, conn *mailclient.IMAP, req *folderRequest) (map[string]any, error) {
 		if err := userFolder(ctx, conn, req.Name); err != nil {
 			return nil, err
 		}
+		var err error
+		if delim, err = conn.Delimiter(ctx); err != nil {
+			return nil, err
+		}
+		name = req.Name
 		return nil, conn.DeleteFolder(ctx, req.Name)
 	})
+	if ok {
+		p.folderDeleted(userIDFrom(r), name, delim)
+	}
 }
 
 // POST /folders/read {folder} — "Прочитать все".

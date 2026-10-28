@@ -666,3 +666,36 @@ func TestDraftAndInlineImage(t *testing.T) {
 	assert.Equal(t, "файл.txt", msg.Attachment[0].Filename)
 	assert.Equal(t, "Текст\r\n\r\nИван Петров", msg.Text)
 }
+
+func TestSendersAndCopy(t *testing.T) {
+	s := startIMAP(t, false)
+	s.appendRaw(t, "INBOX", plainCP1251)
+	s.appendRaw(t, "INBOX", multipartMessage)
+	s.appendRaw(t, "INBOX", multipartMessage, imap.FlagSeen)
+	conn := s.dial(t)
+	ctx := context.Background()
+
+	all, err := conn.SendersSince(ctx, "INBOX", 1, 10)
+	require.NoError(t, err)
+	require.Len(t, all, 3, "seen messages count too")
+	assert.Less(t, all[0].UID, all[1].UID, "oldest first")
+	assert.Equal(t, "ivan@example.ru", all[0].From[0].Email)
+
+	later, err := conn.SendersSince(ctx, "INBOX", all[2].UID+1, 10)
+	require.NoError(t, err)
+	assert.Empty(t, later, "N:* does not return the last old message")
+
+	anna, err := conn.SendersFrom(ctx, "INBOX", "anna@example.ru", 10)
+	require.NoError(t, err)
+	assert.Len(t, anna, 2)
+
+	folder, err := conn.CreateFolder(ctx, "", "Анна")
+	require.NoError(t, err)
+	require.NoError(t, conn.Copy(ctx, "INBOX", []uint32{anna[0].UID}, folder))
+	inbox, err := conn.Status(ctx, "INBOX")
+	require.NoError(t, err)
+	assert.Equal(t, 3, inbox.Total, "a copy leaves Inbox as it is")
+	copied, err := conn.List(ctx, folder, 0, 10)
+	require.NoError(t, err)
+	assert.Len(t, copied.Messages, 1)
+}

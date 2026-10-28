@@ -131,6 +131,9 @@ func (p *Plugin) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, codeBadRequest, "unknown filter")
 		return
 	}
+	if folder == "INBOX" && offset == 0 {
+		p.checkSoon(userIDFrom(r))
+	}
 	var page *mailclient.Page
 	if !p.mailRequest(w, r, func(ctx context.Context, _ *store.Account, conn *mailclient.IMAP) error {
 		var err error

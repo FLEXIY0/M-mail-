@@ -12,7 +12,7 @@ import {Linkify} from './ui';
 import type {ApiError} from '../api';
 import {api, attachmentUrl} from '../api';
 import {addressFull, addressLabel, formatFullDate, formatSize} from '../format';
-import {mailChanged, openCompose, openInBrowser, openShare, popRoute} from '../state';
+import {mailChanged, openCompose, openInBrowser, openRule, openShare, popRoute, showToast} from '../state';
 import type {Folder, Me, Message, MessageRef} from '../types';
 
 // Folders are listed once per panel and shared by all opened messages.
@@ -95,8 +95,18 @@ export default function MessageView({me, msgRef}: {me: Me; msgRef: MessageRef}) 
         leave();
     });
 
+    const sender = (msg?.from[0]?.email || '').toLowerCase();
+    const canRule = Boolean(sender) && folder?.role !== 'sent' && folder?.role !== 'drafts';
+
     const move = (target: {to?: string; role?: string}) => run(async () => {
         await api.move(msgRef.folder, [msgRef.uid], target);
+        const to = folders.find((f) => f.name === target.to);
+        if (to && canRule && to.role !== 'inbox' && to.role !== 'trash') {
+            showToast(`Письмо → «${folderTitle(to)}»`, {
+                ms: 8000,
+                action: {label: 'Всегда сюда', run: () => openRule({from: sender, folder: to.name})},
+            });
+        }
         leave();
     });
 
@@ -216,6 +226,20 @@ export default function MessageView({me, msgRef}: {me: Me; msgRef: MessageRef}) 
                                         {'Отправить в канал Mattermost'}
                                     </button>
                                 </li>
+                                {canRule && (
+                                    <li>
+                                        <button
+                                            type='button'
+                                            role='menuitem'
+                                            onClick={() => {
+                                                setMenu('');
+                                                openRule({from: sender});
+                                            }}
+                                        >
+                                            {`Письма от ${sender} — в папку…`}
+                                        </button>
+                                    </li>
+                                )}
                                 {webUrl && (
                                     <li>
                                         <button

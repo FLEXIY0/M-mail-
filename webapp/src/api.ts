@@ -2,7 +2,7 @@ import manifest from 'manifest';
 
 import type {
     CheckResult, Endpoint, Folder, IconAction, IconInfo, MattermostUser, Me, Message,
-    MessagePage, PluginConfig, SendRequest, Settings, UpdateInfo,
+    MessagePage, PluginConfig, SendRequest, Settings, SortRule, SortRuleInput, UpdateInfo,
 } from './types';
 
 export class ApiError extends Error {
@@ -131,6 +131,11 @@ export const api = {
     deleteFolder: (name: string) => request<{ok: boolean}>('POST', '/folders/delete', {name}),
     readAll: (folder: string) => request<{ok: boolean}>('POST', '/folders/read', {folder}),
     emptyFolder: (folder: string) => request<{ok: boolean}>('POST', '/folders/empty', {folder}),
+
+    rules: () => request<{rules: SortRule[]}>('GET', '/rules'),
+    saveRule: (rule: SortRuleInput) =>
+        request<{ok: boolean; rule: SortRule; rules: SortRule[]; sorted: number; moved: number}>('POST', '/rules', rule),
+    deleteRule: (id: string) => request<{ok: boolean; rules: SortRule[]}>('POST', '/rules/delete', {id}),
 
     saveSignatureImage: (dataUrl: string) => request<Me>('PUT', '/signature-image', {data_url: dataUrl}),
     deleteSignatureImage: () => request<Me>('POST', '/signature-image/delete'),

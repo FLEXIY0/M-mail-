@@ -6,6 +6,7 @@
 //	u:<user id>  Account     – connection and settings, written by the API
 //	s:<user id>  SyncState   – result of the last background check
 //	p:<user id>  Preferences – choices that survive "disconnect"
+//	r:<user id>  Rules       – sorting of new mail into folders
 package store
 
 import (
@@ -23,6 +24,7 @@ const (
 	syncPrefix    = "s:"
 	prefsPrefix   = "p:"
 	imagePrefix   = "i:"
+	rulesPrefix   = "r:"
 	listPageSize  = 1000
 )
 
@@ -175,9 +177,55 @@ func (s *Store) SaveSignatureImage(userID string, img *SignatureImage) error {
 	return errors.Wrap(err, "failed to save signature image")
 }
 
+// Rule puts new mail from a sender into a folder, like the filters of
+// web mail. The plugin applies it when it checks Inbox.
+type Rule struct {
+	ID string `json:"id"`
+	// From is an address ("anna@example.ru") or a domain ("@example.ru"),
+	// in lower case.
+	From   string `json:"from"`
+	Folder string `json:"folder"`
+	// KeepInInbox copies the message instead of moving it: it is both in
+	// Inbox (with the usual notification) and in the folder.
+	KeepInInbox bool      `json:"keep_in_inbox"`
+	CreatedAt   time.Time `json:"created_at"`
+	// Applied counts the messages the rule has sorted.
+	Applied   int    `json:"applied"`
+	LastError string `json:"last_error,omitempty"`
+}
+
+// Matches tells whether the address is covered by the rule.
+func (r *Rule) Matches(email string) bool {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if strings.HasPrefix(r.From, "@") {
+		return strings.HasSuffix(email, r.From)
+	}
+	return email == r.From
+}
+
+type ruleList struct {
+	Rules []Rule `json:"rules"`
+}
+
+func (s *Store) GetRules(userID string) ([]Rule, error) {
+	var list ruleList
+	if err := s.kv.Get(rulesPrefix+userID, &list); err != nil {
+		return nil, errors.Wrap(err, "failed to load rules")
+	}
+	return list.Rules, nil
+}
+
+func (s *Store) SaveRules(userID string, rules []Rule) error {
+	if len(rules) == 0 {
+		return errors.Wrap(s.kv.Delete(rulesPrefix+userID), "failed to delete rules")
+	}
+	_, err := s.kv.Set(rulesPrefix+userID, &ruleList{Rules: rules})
+	return errors.Wrap(err, "failed to save rules")
+}
+
 // DeleteUser removes the account and its state. Preferences stay.
 func (s *Store) DeleteUser(userID string) error {
-	for _, prefix := range []string{accountPrefix, syncPrefix, imagePrefix} {
+	for _, prefix := range []string{accountPrefix, syncPrefix, imagePrefix, rulesPrefix} {
 		if err := s.kv.Delete(prefix + userID); err != nil {
 			return errors.Wrap(err, "failed to delete user data")
 		}

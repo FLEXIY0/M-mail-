@@ -9,6 +9,7 @@ import {
 } from './icons';
 import IconSettingsDialog from './IconSettings';
 import MessageView from './MessageView';
+import {RuleEditor, RulesPage} from './Rules';
 import SettingsDialog from './SettingsDialog';
 import {ErrorCard} from './shared';
 import ShareDialog from './ShareDialog';
@@ -19,7 +20,10 @@ import type {ApiError} from '../api';
 import {api} from '../api';
 import {addressLabel, avatarColor, dateGroup, formatListDate, initials, pluralMessages} from '../format';
 import {guides} from '../guides';
-import {hideToast, loadAll, mailChanged, openCompose, openInBrowser, openWizard, pushRoute, refreshMe, setState, showToast, useStore} from '../state';
+import {
+    hideToast, loadAll, mailChanged, openCompose, openInBrowser, openRule, openRules, openWizard, pushRoute, refreshMe, setState,
+    showToast, useStore,
+} from '../state';
 import type {Route} from '../state';
 import type {Address, Folder, FolderRole, Me, MessageFilter, MessageSummary, ProviderID} from '../types';
 
@@ -149,6 +153,10 @@ function RouteScreen({route, me}: {route: Route; me: Me}) {
         return <Composer request={route.request}/>;
     case 'share':
         return <ShareDialog msgRef={route.ref}/>;
+    case 'rules':
+        return <RulesPage/>;
+    case 'rule':
+        return <RuleEditor draft={route.rule}/>;
     case 'message':
         return (
             <MessageView
@@ -522,11 +530,19 @@ function Mailbox({me}: {me: Me}) {
         if (!uids.length || target.to === folder) {
             return;
         }
+
+        // All from one sender: offer to send their mail there from now on.
+        const senders = new Set((list?.messages || []).filter((m) => uids.includes(m.uid)).map((m) => (m.from[0]?.email || '').toLowerCase()));
+        const sender = senders.size === 1 && !sentFolder ? Array.from(senders)[0] : '';
         dropMessages(uids);
         try {
             await api.move(folder, uids, target);
             loadFolders();
-            showToast(`${uids.length > 1 ? pluralMessages(uids.length) : 'Письмо'} → «${title}»`);
+            const text = `${uids.length > 1 ? pluralMessages(uids.length) : 'Письмо'} → «${title}»`;
+            showToast(text, sender && target.to ? {
+                ms: 8000,
+                action: {label: 'Всегда сюда', run: () => openRule({from: sender, folder: target.to})},
+            } : {});
         } catch (e) {
             setError(e as ApiError);
             loadList(false);
@@ -1328,6 +1344,17 @@ function FolderDrawer({me, folders, current, filter, webUrl, startCreate, draggi
                             >
                                 <GearIcon size={20}/>
                                 <span>{'Настройки почты'}</span>
+                            </button>
+                            <button
+                                type='button'
+                                className='mml-drawer__item'
+                                onClick={() => {
+                                    onClose();
+                                    openRules();
+                                }}
+                            >
+                                <MoveIcon size={20}/>
+                                <span>{'Правила сортировки'}</span>
                             </button>
                             {webUrl && (
                                 <button

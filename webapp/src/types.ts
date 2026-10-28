@@ -207,3 +207,22 @@ export interface UpdateInfo {
     source: string;
     check_error?: string;
 }
+
+// SortRule puts new mail from a sender (or a whole domain) into a folder.
+export interface SortRule {
+    id: string;
+    from: string;
+    folder: string;
+    keep_in_inbox: boolean;
+    created_at: string;
+    applied: number;
+    last_error?: string;
+}
+
+export interface SortRuleInput {
+    id?: string;
+    from: string;
+    folder: string;
+    keep_in_inbox: boolean;
+    apply_existing: boolean;
+}
