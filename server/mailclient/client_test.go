@@ -567,3 +567,102 @@ func TestParseHelpers(t *testing.T) {
 	assert.NoError(t, Endpoint{Host: "imap.example.com", Port: 993, Security: SecurityTLS}.Validate())
 	assert.Equal(t, "imap.example.com:993", Endpoint{Host: "imap.example.com", Port: 993}.Address())
 }
+
+func TestFolderManagement(t *testing.T) {
+	s := startIMAP(t, false)
+	s.appendRaw(t, "INBOX", plainCP1251)
+	s.appendRaw(t, "INBOX", multipartMessage)
+	conn := s.dial(t)
+	ctx := context.Background()
+
+	name, err := conn.CreateFolder(ctx, "", "Проекты")
+	require.NoError(t, err)
+	assert.Equal(t, "Проекты", name)
+	child, err := conn.CreateFolder(ctx, "Проекты", "Север")
+	require.NoError(t, err)
+	assert.Equal(t, "Проекты/Север", child)
+	_, err = conn.CreateFolder(ctx, "Проекты", "a/b")
+	assert.Error(t, err, "the delimiter is not allowed in a name")
+
+	folders, err := conn.Folders(ctx)
+	require.NoError(t, err)
+	byName := map[string]Folder{}
+	for _, f := range folders {
+		byName[f.Name] = f
+	}
+	require.Contains(t, byName, "Проекты/Север")
+	assert.Equal(t, 1, byName["Проекты/Север"].Depth)
+	assert.Equal(t, "Север", byName["Проекты/Север"].Display)
+	assert.Equal(t, "/", byName["Проекты/Север"].Delim)
+
+	page, err := conn.List(ctx, "INBOX", 0, 10)
+	require.NoError(t, err)
+	require.NoError(t, conn.Move(ctx, "INBOX", []uint32{page.Messages[0].UID}, child))
+
+	renamed, err := conn.RenameFolder(ctx, child, "Север-2")
+	require.NoError(t, err)
+	assert.Equal(t, "Проекты/Север-2", renamed)
+	moved, err := conn.List(ctx, renamed, 0, 10)
+	require.NoError(t, err)
+	assert.Len(t, moved.Messages, 1, "messages move with the folder")
+
+	require.NoError(t, conn.MarkAllSeen(ctx, "INBOX"))
+	status, err := conn.Status(ctx, "INBOX")
+	require.NoError(t, err)
+	assert.Equal(t, 0, status.Unseen)
+
+	require.NoError(t, conn.EmptyFolder(ctx, renamed))
+	moved, err = conn.List(ctx, renamed, 0, 10)
+	require.NoError(t, err)
+	assert.Empty(t, moved.Messages)
+
+	require.NoError(t, conn.DeleteFolder(ctx, renamed))
+	folders, err = conn.Folders(ctx)
+	require.NoError(t, err)
+	for _, f := range folders {
+		assert.NotEqual(t, renamed, f.Name)
+	}
+
+	// "Spam" exists on the test server; a missing role folder is created.
+	junk, err := conn.EnsureFolder(ctx, RoleJunk, "Спам")
+	require.NoError(t, err)
+	assert.Equal(t, "Спам", junk)
+	archive, err := conn.EnsureFolder(ctx, RoleArchive, "Архив")
+	require.NoError(t, err)
+	assert.Equal(t, "Архив", archive)
+}
+
+func TestDraftAndInlineImage(t *testing.T) {
+	s := startIMAP(t, false)
+	conn := s.dial(t)
+	ctx := context.Background()
+	out := &Outgoing{
+		From:    Address{Name: "Иван", Email: testUser},
+		To:      []Address{{Email: "anna@example.ru"}},
+		Bcc:     []Address{{Email: "secret@example.ru"}},
+		Subject: "Черновик",
+		Text:    "Текст\n\nИван Петров",
+		HTML:    `<div>Текст</div><table><tr><td><img src="cid:signature@mail"></td><td>Иван Петров</td></tr></table>`,
+		Inline:  []InlineImage{{ContentID: "signature@mail", ContentType: "image/png", Filename: "photo.png", Data: []byte("png-bytes")}},
+		Attachments: []OutgoingAttachment{
+			{Filename: "файл.txt", ContentType: "text/plain", Data: []byte("data")},
+		},
+		KeepBcc: true,
+	}
+	raw, _, err := out.Build()
+	require.NoError(t, err)
+	assert.Contains(t, string(raw), "secret@example.ru", "drafts keep Bcc")
+	assert.Contains(t, string(raw), "multipart/related")
+
+	_, err = conn.AppendDraft(ctx, "INBOX", raw)
+	require.NoError(t, err)
+	page, err := conn.List(ctx, "INBOX", 0, 10)
+	require.NoError(t, err)
+	require.Len(t, page.Messages, 1)
+	msg, err := conn.Get(ctx, "INBOX", page.Messages[0].UID, false)
+	require.NoError(t, err)
+	assert.Contains(t, msg.HTML, "data:image/png;base64,", "the signature photo is shown in the reader")
+	require.Len(t, msg.Attachment, 1, "the inline photo is not an attachment")
+	assert.Equal(t, "файл.txt", msg.Attachment[0].Filename)
+	assert.Equal(t, "Текст\r\n\r\nИван Петров", msg.Text)
+}

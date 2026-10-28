@@ -2135,3 +2135,271 @@ $flag: #ff5c5c;
     .mml-server-row { flex-wrap: wrap; }
     .mml-server-row__host { flex-basis: 100%; }
 }
+
+// Selection, drag and drop, folders, toasts, signature ----------------------
+
+.mml-menu {
+    button {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+
+        svg { flex: none; color: fg(0.64); }
+        &:disabled { opacity: 0.45; cursor: default; background: none; }
+    }
+
+    &__item--danger { color: rgb($error-rgb) !important; svg { color: rgb($error-rgb) !important; } }
+}
+
+.mml-message {
+    &__pick {
+        display: flex;
+        flex: none;
+        align-items: flex-start;
+        padding: 12px 0 12px 16px;
+        border: none;
+        background: transparent;
+        cursor: pointer;
+
+        &:focus-visible { @extend %focus; }
+        &:hover .mml-message__avatar, &:hover .mml-avatar-img { box-shadow: 0 0 0 2px accent(0.5); }
+    }
+
+    &__check {
+        display: inline-flex;
+        width: 40px;
+        height: 40px;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        background: $accent;
+        color: $accent-fg;
+        animation: mml-pop 0.15s ease-out;
+    }
+
+    &__main { padding-left: 14px; }
+
+    &--selected, &--selected:hover { background: accent(0.12); }
+
+    &[draggable='true'] { cursor: default; }
+}
+
+@keyframes mml-pop {
+    from { transform: scale(0.6); }
+    to { transform: none; }
+}
+
+.mml-selbar {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    padding: 4px 4px 6px;
+    border-bottom: 1px solid fg(0.08);
+    background: $bg;
+
+    &__row { display: flex; align-items: center; gap: 4px; padding: 0 8px; }
+    &__count { font-size: 18px; font-weight: 700; }
+    &__actions { justify-content: space-around; }
+}
+
+.mml-menu--scroll { max-height: 300px; }
+
+.mml-drawer {
+    &__row {
+        position: relative;
+        display: flex;
+        align-items: center;
+        transition: background 0.1s;
+
+        &--drop {
+            background: accent(0.14);
+            box-shadow: inset 3px 0 0 $accent;
+
+            .mml-drawer__item { color: $accent; svg { color: $accent; } }
+        }
+    }
+
+    &__more {
+        position: absolute;
+        top: 50%;
+        right: 8px;
+        transform: translateY(-50%);
+        opacity: 0;
+    }
+
+    &__row:hover &__more, &__more:focus-within { opacity: 1; }
+    &__row:hover .mml-drawer__count { visibility: hidden; }
+
+    &__item--add { color: $accent; svg { color: $accent; } }
+
+    &__edit {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-height: 46px;
+        padding-right: 8px;
+
+        > svg { flex: none; color: fg(0.72); }
+    }
+
+    &__input { flex: 1; min-width: 0; height: 34px; }
+
+    &__error { margin: 4px 16px; color: rgb($error-rgb); font-size: 13px; }
+
+    &__hint {
+        margin: 0 16px 8px;
+        padding: 8px 12px;
+        border-radius: 8px;
+        background: accent(0.1);
+        color: $accent;
+        font-size: 13px;
+        font-weight: 600;
+    }
+
+    &--dragging .mml-drawer__item { min-height: 50px; }
+}
+
+.mml-drag-ghost {
+    position: fixed;
+    top: -100px;
+    left: -1000px;
+    max-width: 260px;
+    overflow: hidden;
+    padding: 8px 12px;
+    border-radius: 8px;
+    background: var(--button-bg, #1c58d9);
+    color: var(--button-color, #fff);
+    font: 600 13px/1.2 sans-serif;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.mml-toast {
+    position: absolute;
+    right: 12px;
+    bottom: 64px;
+    left: 12px;
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    overflow: hidden;
+    padding: 12px 10px 12px 16px;
+    border-radius: 10px;
+    background: rgba(32, 33, 36, 0.94);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+    color: #fff;
+    font-size: 14px;
+    animation: mml-toast-in 0.18s ease-out;
+
+    &--error { background: rgb($error-rgb); }
+    &__text { flex: 1; min-width: 0; }
+
+    &__action {
+        flex: none;
+        padding: 4px 8px;
+        border: none;
+        border-radius: 6px;
+        background: none;
+        color: #8ab4ff;
+        font-weight: 700;
+        font-size: 14px;
+        cursor: pointer;
+
+        &:hover { background: rgba(255, 255, 255, 0.12); }
+    }
+
+    &__close.mml-icon-btn { color: rgba(255, 255, 255, 0.7); &:hover { color: #fff; background: rgba(255, 255, 255, 0.12); } }
+
+    &__progress {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        height: 3px;
+        width: 100%;
+        background: #8ab4ff;
+        transform-origin: left;
+        animation: mml-countdown linear forwards;
+    }
+}
+
+@keyframes mml-toast-in {
+    from { transform: translateY(12px); opacity: 0; }
+    to { transform: none; opacity: 1; }
+}
+
+@keyframes mml-countdown {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+}
+
+.mml-sig-preview {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+
+    &--above { flex-direction: column; align-items: flex-start; gap: 8px; }
+
+    img { flex: none; display: block; object-fit: cover; }
+
+    &__empty {
+        display: inline-flex;
+        width: 64px;
+        height: 64px;
+        flex: none;
+        align-items: center;
+        justify-content: center;
+        border: 1px dashed fg(0.24);
+        border-radius: 50%;
+        color: fg(0.4);
+    }
+
+    &__text { min-width: 0; color: fg(0.64); font-size: 13px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+
+.mml-sigimg {
+    gap: 10px;
+
+    .mml-sig-preview { padding: 12px; border: 1px solid fg(0.12); border-radius: 8px; }
+    .mml-btn svg { margin-right: 6px; vertical-align: -2px; }
+}
+
+.mml-row--wrap { flex-wrap: wrap; }
+
+.mml-field__hint--error { color: rgb($error-rgb); }
+
+.mml-segmented {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 2px;
+    border-radius: 8px;
+    background: fg(0.08);
+
+    button {
+        padding: 5px 12px;
+        border: none;
+        border-radius: 6px;
+        background: none;
+        color: fg(0.72);
+        font-size: 13px;
+        cursor: pointer;
+    }
+
+    &__on { background: $bg !important; color: $fg !important; font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16); }
+}
+
+.mml-composer__signature {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 0 16px 12px;
+    padding: 10px 8px 10px 12px;
+    border-left: 2px solid fg(0.12);
+
+    .mml-sig-preview { flex: 1; }
+    .mml-icon-btn { opacity: 0.5; &:hover { opacity: 1; } }
+}
+
+// While messages are being selected, the row toolbar would cover the list.
+.mml-message__pick--on ~ .mml-message__actions { display: none !important; }

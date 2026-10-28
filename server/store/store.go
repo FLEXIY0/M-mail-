@@ -22,6 +22,7 @@ const (
 	accountPrefix = "u:"
 	syncPrefix    = "s:"
 	prefsPrefix   = "p:"
+	imagePrefix   = "i:"
 	listPageSize  = 1000
 )
 
@@ -38,6 +39,18 @@ type Settings struct {
 	LoadImages bool `json:"load_images"`
 	// Signature is appended to new messages and replies.
 	Signature string `json:"signature"`
+	// SignatureImage tells that a photo or logo is stored for the
+	// signature (see GetSignatureImage); SignatureLayout places it "left"
+	// of the text or "above" it.
+	SignatureImage  bool   `json:"signature_image"`
+	SignatureLayout string `json:"signature_layout,omitempty"`
+}
+
+// SignatureImage is the picture of the signature, kept apart from the
+// account so that ordinary requests do not load it.
+type SignatureImage struct {
+	ContentType string `json:"content_type"`
+	Data        []byte `json:"data"`
 }
 
 // DefaultSettings are chosen so that a user who just clicks "Next" gets a
@@ -143,9 +156,28 @@ func (s *Store) SavePreferences(userID string, prefs *Preferences) error {
 	return errors.Wrap(err, "failed to save preferences")
 }
 
+func (s *Store) GetSignatureImage(userID string) (*SignatureImage, error) {
+	var img SignatureImage
+	if err := s.kv.Get(imagePrefix+userID, &img); err != nil {
+		return nil, errors.Wrap(err, "failed to load signature image")
+	}
+	if len(img.Data) == 0 {
+		return nil, nil
+	}
+	return &img, nil
+}
+
+func (s *Store) SaveSignatureImage(userID string, img *SignatureImage) error {
+	if img == nil {
+		return errors.Wrap(s.kv.Delete(imagePrefix+userID), "failed to delete signature image")
+	}
+	_, err := s.kv.Set(imagePrefix+userID, img)
+	return errors.Wrap(err, "failed to save signature image")
+}
+
 // DeleteUser removes the account and its state. Preferences stay.
 func (s *Store) DeleteUser(userID string) error {
-	for _, prefix := range []string{accountPrefix, syncPrefix} {
+	for _, prefix := range []string{accountPrefix, syncPrefix, imagePrefix} {
 		if err := s.kv.Delete(prefix + userID); err != nil {
 			return errors.Wrap(err, "failed to delete user data")
 		}

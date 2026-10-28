@@ -51,7 +51,6 @@ export default function MessageView({me, msgRef}: {me: Me; msgRef: MessageRef}) 
 
     const folder = folders.find((f) => f.name === msgRef.folder);
     const trash = folders.find((f) => f.role === 'trash');
-    const junk = folders.find((f) => f.role === 'junk');
     const inbox = folders.find((f) => f.role === 'inbox');
     const inTrash = folder?.role === 'trash' || (folders.length > 0 && !trash);
     const inJunk = folder?.role === 'junk';
@@ -159,7 +158,7 @@ export default function MessageView({me, msgRef}: {me: Me; msgRef: MessageRef}) 
                             </ul>
                         )}
                     </div>
-                    {(junk || inJunk) && (
+                    {folder?.role !== 'sent' && folder?.role !== 'drafts' && (
                         <button
                             type='button'
                             className='mml-icon-btn mml-icon-btn--lg mml-icon-btn--accent-plain'

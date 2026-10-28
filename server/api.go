@@ -47,6 +47,15 @@ func (p *Plugin) initRouter() *mux.Router {
 	api.HandleFunc("/move", p.handleMove).Methods(http.MethodPost)
 	api.HandleFunc("/delete", p.handleDelete).Methods(http.MethodPost)
 	api.HandleFunc("/send", p.handleSend).Methods(http.MethodPost)
+	api.HandleFunc("/drafts", p.handleSaveDraft).Methods(http.MethodPost)
+	api.HandleFunc("/folders/create", p.handleCreateFolder).Methods(http.MethodPost)
+	api.HandleFunc("/folders/rename", p.handleRenameFolder).Methods(http.MethodPost)
+	api.HandleFunc("/folders/delete", p.handleDeleteFolder).Methods(http.MethodPost)
+	api.HandleFunc("/folders/read", p.handleReadAll).Methods(http.MethodPost)
+	api.HandleFunc("/folders/empty", p.handleEmptyFolder).Methods(http.MethodPost)
+	api.HandleFunc("/signature-image", p.handleGetSignatureImage).Methods(http.MethodGet)
+	api.HandleFunc("/signature-image", p.handlePutSignatureImage).Methods(http.MethodPut)
+	api.HandleFunc("/signature-image/delete", p.handleDeleteSignatureImage).Methods(http.MethodPost)
 	api.HandleFunc("/share", p.handleShare).Methods(http.MethodPost)
 	api.HandleFunc("/actions/open", p.handleActionOpen).Methods(http.MethodPost)
 	api.HandleFunc("/actions/read", p.handleActionRead).Methods(http.MethodPost)
@@ -99,7 +108,11 @@ func writeMailError(w http.ResponseWriter, err error) {
 }
 
 func decodeBody(r *http.Request, v any) error {
-	return json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(v)
+	return decodeLimited(r, v, maxBodyBytes)
+}
+
+func decodeLimited(r *http.Request, v any, limit int64) error {
+	return json.NewDecoder(io.LimitReader(r.Body, limit)).Decode(v)
 }
 
 // GET /config — everything the wizard needs before the user connects.
@@ -344,6 +357,9 @@ type connectRequest struct {
 
 func sanitizeSettings(in store.Settings) store.Settings {
 	out := in
+	if out.SignatureLayout != "above" {
+		out.SignatureLayout = "left"
+	}
 	out.Signature = strings.TrimSpace(strings.ReplaceAll(in.Signature, "\r\n", "\n"))
 	if utf8.RuneCountInString(out.Signature) > maxSignature {
 		out.Signature = string([]rune(out.Signature)[:maxSignature])
@@ -480,7 +496,10 @@ func (p *Plugin) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, codeNotConnected, "")
 		return
 	}
+	hasImage := account.Settings.SignatureImage
 	account.Settings = sanitizeSettings(req.Settings)
+	// The picture flag is managed by /signature-image, not by the form.
+	account.Settings.SignatureImage = hasImage
 	if req.DisplayName != nil {
 		account.DisplayName = cleanName(*req.DisplayName)
 	}

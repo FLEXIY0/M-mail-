@@ -10,7 +10,9 @@ import type {Me, MessageRef, PluginConfig, Recipient, WizardMode} from './types'
 // ComposeRequest opens the composer: a new message, a reply or a forward.
 export interface ComposeRequest {
     id?: string;
-    mode: 'new' | 'reply' | 'reply_all' | 'forward';
+
+    // 'draft' continues a draft saved in the Drafts folder (source).
+    mode: 'new' | 'reply' | 'reply_all' | 'forward' | 'draft';
     source?: MessageRef;
     to?: Recipient[];
     subject?: string;
@@ -41,6 +43,20 @@ export interface State {
 
     // Incremented whenever the mailbox may have changed on the server.
     revision: number;
+
+    toast: Toast | null;
+}
+
+// Toast is a short message at the bottom of the panel, e.g. "Письмо
+// отправлено", optionally with one action ("Отменить").
+export interface Toast {
+    id: number;
+    text: string;
+    kind?: 'error';
+    action?: {label: string; run: () => void};
+
+    // A countdown bar, for "undo send".
+    countdown?: number;
 }
 
 let state: State = {
@@ -51,6 +67,7 @@ let state: State = {
     routes: [],
     folderRequest: null,
     revision: 0,
+    toast: null,
 };
 
 const listeners = new Set<() => void>();
@@ -218,5 +235,24 @@ export function openInBrowser(url: string) {
     const win = window.open(url, '_blank', 'noopener,noreferrer');
     if (win) {
         win.opener = null;
+    }
+}
+
+let toastId = 0;
+let toastTimer: number | undefined;
+
+// showToast shows a toast for `ms` milliseconds and returns its id.
+export function showToast(text: string, opts: {kind?: 'error'; action?: Toast['action']; ms?: number; countdown?: number} = {}): number {
+    toastId++;
+    const id = toastId;
+    window.clearTimeout(toastTimer);
+    setState({toast: {id, text, kind: opts.kind, action: opts.action, countdown: opts.countdown}});
+    toastTimer = window.setTimeout(() => hideToast(id), opts.ms || 4000);
+    return id;
+}
+
+export function hideToast(id?: number) {
+    if (id === undefined || state.toast?.id === id) {
+        setState({toast: null});
     }
 }

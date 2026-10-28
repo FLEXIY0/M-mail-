@@ -2,9 +2,10 @@ import React from 'react';
 
 import Composer from './Composer';
 import {
-    ArchiveIcon, ArrowLeftIcon, BellIcon, BookmarkIcon, CloseIcon, DraftIcon, ExternalIcon, FolderIcon,
-    GearIcon, InboxIcon, MailIcon, MailOpenIcon, MenuIcon, PaperclipIcon, PlusIcon, RefreshIcon,
-    ReplyIcon, SearchIcon, SendIcon, SlidersIcon, SpamIcon, Spinner, TrashIcon,
+    ArchiveIcon, ArrowLeftIcon, BellIcon, BookmarkIcon, CheckAllIcon, CheckIcon, CloseIcon, DraftIcon, ExternalIcon,
+    FolderIcon, FolderPlusIcon, GearIcon, InboxIcon, MailIcon, MailOpenIcon, MenuIcon, MoreVerticalIcon, MoveIcon,
+    PaperclipIcon, PenIcon, PlusIcon, RefreshIcon, ReplyIcon, SearchIcon, SendIcon, SlidersIcon, SpamIcon, Spinner,
+    ThumbDownIcon, TrashIcon,
 } from './icons';
 import IconSettingsDialog from './IconSettings';
 import MessageView from './MessageView';
@@ -18,7 +19,7 @@ import type {ApiError} from '../api';
 import {api} from '../api';
 import {addressLabel, avatarColor, dateGroup, formatListDate, initials, pluralMessages} from '../format';
 import {guides} from '../guides';
-import {loadAll, openCompose, openInBrowser, openWizard, pushRoute, refreshMe, setState, useStore} from '../state';
+import {hideToast, loadAll, mailChanged, openCompose, openInBrowser, openWizard, pushRoute, refreshMe, setState, showToast, useStore} from '../state';
 import type {Route} from '../state';
 import type {Address, Folder, FolderRole, Me, MessageFilter, MessageSummary, ProviderID} from '../types';
 
@@ -213,8 +214,70 @@ export default function Panel() {
                     />
                 </div>
             ))}
+            <ToastView/>
         </div>
     );
+}
+
+function ToastView() {
+    const toast = useStore((s) => s.toast);
+    if (!toast) {
+        return null;
+    }
+    return (
+        <div
+            className={`mml-toast ${toast.kind === 'error' ? 'mml-toast--error' : ''}`}
+            role='status'
+            aria-live='polite'
+        >
+            <span className='mml-toast__text'>{toast.text}</span>
+            {toast.action && (
+                <button
+                    type='button'
+                    className='mml-toast__action'
+                    onClick={toast.action.run}
+                >
+                    {toast.action.label}
+                </button>
+            )}
+            <button
+                type='button'
+                className='mml-icon-btn mml-toast__close'
+                aria-label='Скрыть'
+                onClick={() => hideToast(toast.id)}
+            >
+                <CloseIcon size={12}/>
+            </button>
+            {toast.countdown && (
+                <span
+                    key={toast.id}
+                    className='mml-toast__progress'
+                    style={{animationDuration: `${toast.countdown}ms`}}
+                />
+            )}
+        </div>
+    );
+}
+
+// Messages are dragged to a folder in the drawer with this data type.
+export const DRAG_TYPE = 'application/x-mml-messages';
+
+interface DragData {
+    folder: string;
+    uids: number[];
+}
+
+function isMailDrag(e: React.DragEvent) {
+    return Array.from(e.dataTransfer.types).includes(DRAG_TYPE);
+}
+
+function readDrag(e: React.DragEvent): DragData | null {
+    try {
+        const data = JSON.parse(e.dataTransfer.getData(DRAG_TYPE)) as DragData;
+        return data && Array.isArray(data.uids) ? data : null;
+    } catch {
+        return null;
+    }
 }
 
 function ConnectPrompt() {
@@ -304,6 +367,11 @@ function Mailbox({me}: {me: Me}) {
     const [error, setError] = React.useState<ApiError | null>(null);
     const [fetching, setFetching] = React.useState(false);
     const [loadingMore, setLoadingMore] = React.useState(false);
+    const [selected, setSelected] = React.useState<Set<number>>(() => new Set());
+    const [moreMenu, setMoreMenu] = React.useState(false);
+    const [moveMenu, setMoveMenu] = React.useState(false);
+    const [dragging, setDragging] = React.useState(false);
+    const [drawerCreate, setDrawerCreate] = React.useState(false);
     const requestId = React.useRef(0);
 
     const setFolder = (name: string) => {
@@ -312,6 +380,7 @@ function Mailbox({me}: {me: Me}) {
         setQuery('');
         setSearchOpen(false);
         setList(null);
+        setSelected(new Set());
         setDrawerOpen(false);
     };
 
@@ -352,6 +421,10 @@ function Mailbox({me}: {me: Me}) {
                 }
                 setError(null);
                 setAvatars((prev) => ({...prev, ...(page.avatars || {})}));
+                if (!append) {
+                    // Keep only the selected messages that are still there.
+                    setSelected((prev) => (prev.size ? new Set(page.messages.filter((m) => prev.has(m.uid)).map((m) => m.uid)) : prev));
+                }
                 setList((prev) => ({
                     messages: append && prev ? [...prev.messages, ...page.messages.filter((m) => !prev.messages.some((p) => p.uid === m.uid))] : page.messages,
                     total: page.total,
@@ -394,8 +467,10 @@ function Mailbox({me}: {me: Me}) {
     const patchMessage = (uid: number, patch: Partial<MessageSummary>) => {
         setList((prev) => prev && {...prev, messages: prev.messages.map((m) => (m.uid === uid ? {...m, ...patch} : m))});
     };
-    const dropMessage = (uid: number) => {
-        setList((prev) => prev && {...prev, messages: prev.messages.filter((m) => m.uid !== uid), total: Math.max(prev.total - 1, 0)});
+    const dropMessages = (uids: number[]) => {
+        const gone = new Set(uids);
+        setList((prev) => prev && {...prev, messages: prev.messages.filter((m) => !gone.has(m.uid)), total: Math.max(prev.total - gone.size, 0)});
+        setSelected((prev) => new Set(Array.from(prev).filter((u) => !gone.has(u))));
     };
 
     // The opened message is read now: update the row and the counters.
@@ -410,28 +485,86 @@ function Mailbox({me}: {me: Me}) {
     const trash = folders?.find((f) => f.role === 'trash');
     const activeFilter = FILTERS.find((f) => f.id === filter);
 
-    const toggleFlag = async (m: MessageSummary, flag: 'seen' | 'flagged') => {
-        const value = flag === 'seen' ? !m.seen : !m.flagged;
-        patchMessage(m.uid, flag === 'seen' ? {seen: value} : {flagged: value});
+    const inJunk = current?.role === 'junk';
+
+    const setFlags = async (uids: number[], flag: 'seen' | 'flagged', value: boolean) => {
+        const patch = flag === 'seen' ? {seen: value} : {flagged: value};
+        const before = new Map((list?.messages || []).filter((m) => uids.includes(m.uid)).map((m) => [m.uid, m]));
+        uids.forEach((uid) => patchMessage(uid, patch));
         try {
-            await api.setFlag(folder, [m.uid], flag, value);
+            await api.setFlag(folder, uids, flag, value);
             if (flag === 'seen') {
                 loadFolders();
             }
         } catch (e) {
-            patchMessage(m.uid, flag === 'seen' ? {seen: !value} : {flagged: !value});
+            before.forEach((m, uid) => patchMessage(uid, {seen: m.seen, flagged: m.flagged}));
             setError(e as ApiError);
         }
     };
+    const toggleFlag = (m: MessageSummary, flag: 'seen' | 'flagged') => setFlags([m.uid], flag, flag === 'seen' ? !m.seen : !m.flagged);
 
-    const remove = async (m: MessageSummary) => {
-        dropMessage(m.uid);
+    const removeMany = async (uids: number[]) => {
+        dropMessages(uids);
         try {
-            await api.remove(folder, [m.uid]);
+            const res = await api.remove(folder, uids);
             loadFolders();
+            const n = uids.length > 1 ? pluralMessages(uids.length) : 'Письмо';
+            showToast(res.permanent ? `${n} удалено навсегда` : `${n} в корзине`);
         } catch (e) {
             setError(e as ApiError);
             loadList(false);
+        }
+    };
+
+    // moveMany moves messages to a folder, or to Spam/Inbox by role: the
+    // server creates "Спам" if the mailbox has none.
+    const moveMany = async (uids: number[], target: {to?: string; role?: string}, title: string) => {
+        if (!uids.length || target.to === folder) {
+            return;
+        }
+        dropMessages(uids);
+        try {
+            await api.move(folder, uids, target);
+            loadFolders();
+            showToast(`${uids.length > 1 ? pluralMessages(uids.length) : 'Письмо'} → «${title}»`);
+        } catch (e) {
+            setError(e as ApiError);
+            loadList(false);
+        }
+    };
+    const toSpam = (uids: number[]) => (inJunk ? moveMany(uids, {role: 'inbox'}, 'Входящие') : moveMany(uids, {role: 'junk'}, 'Спам'));
+
+    const toggleSelect = (uid: number) => {
+        setSelected((prev) => {
+            const next = new Set(prev);
+            if (next.has(uid)) {
+                next.delete(uid);
+            } else {
+                next.add(uid);
+            }
+            return next;
+        });
+    };
+
+    const folderAction = async (action: 'read' | 'empty') => {
+        setMoreMenu(false);
+        // eslint-disable-next-line no-alert
+        if (action === 'empty' && !window.confirm(`Удалить навсегда все письма в папке «${folderTitle(current, folder)}»?`)) {
+            return;
+        }
+        try {
+            if (action === 'read') {
+                await api.readAll(folder);
+                setList((prev) => prev && {...prev, messages: prev.messages.map((m) => ({...m, seen: true}))});
+                showToast('Все письма прочитаны');
+            } else {
+                await api.emptyFolder(folder);
+                setList((prev) => prev && {...prev, messages: [], total: 0, hasMore: false});
+                showToast('Папка очищена');
+            }
+            loadFolders();
+        } catch (e) {
+            setError(e as ApiError);
         }
     };
 
@@ -467,24 +600,96 @@ function Mailbox({me}: {me: Me}) {
                 avatars={avatars}
                 sentFolder={sentFolder}
                 inTrash={current?.role === 'trash' || !trash}
+                inJunk={inJunk}
+                spamAllowed={current?.role !== 'sent' && current?.role !== 'drafts'}
                 active={opened?.ref.uid === m.uid && opened.ref.folder === folder}
-                onOpen={() => pushRoute({name: 'message', ref: {folder, uid: m.uid}})}
+                selected={selected.has(m.uid)}
+                selecting={selected.size > 0}
+                onOpen={() => {
+                    if (selected.size > 0) {
+                        toggleSelect(m.uid);
+                    } else if (current?.role === 'drafts') {
+                        // A draft opens for editing, like in mail apps.
+                        openCompose({id: `draft-${folder}-${m.uid}`, mode: 'draft', source: {folder, uid: m.uid}});
+                    } else {
+                        pushRoute({name: 'message', ref: {folder, uid: m.uid}});
+                    }
+                }}
+                onSelect={() => toggleSelect(m.uid)}
                 onToggle={(flag) => toggleFlag(m, flag)}
-                onDelete={() => remove(m)}
+                onDelete={() => removeMany([m.uid])}
+                onSpam={() => toSpam([m.uid])}
+                onDragStart={(e) => {
+                    const uids = selected.has(m.uid) ? Array.from(selected) : [m.uid];
+                    e.dataTransfer.setData(DRAG_TYPE, JSON.stringify({folder, uids} as DragData));
+                    e.dataTransfer.setData('text/plain', m.subject || '');
+                    e.dataTransfer.effectAllowed = 'move';
+                    setDragImage(e, uids.length === 1 ? (m.subject || '(без темы)') : pluralMessages(uids.length));
+                    setDragging(true);
+                }}
+                onDragEnd={() => setDragging(false)}
             />,
         );
     }
 
     return (
-        <div className='mml-panel mml-mailbox'>
-            <div className='mml-mb-header'>
+        <div
+            className={`mml-panel mml-mailbox ${dragging ? 'mml-mailbox--dragging' : ''}`}
+            onKeyDown={(e) => {
+                if (e.key === 'Escape' && selected.size) {
+                    setSelected(new Set());
+                }
+            }}
+        >
+            {selected.size > 0 && list && (
+                <SelectionBar
+                    count={selected.size}
+                    allSelected={selected.size === list.messages.length}
+                    anyUnseen={list.messages.some((m) => selected.has(m.uid) && !m.seen)}
+                    anyUnflagged={list.messages.some((m) => selected.has(m.uid) && !m.flagged)}
+                    inTrash={current?.role === 'trash' || !trash}
+                    inJunk={inJunk}
+                    spamAllowed={current?.role !== 'sent' && current?.role !== 'drafts'}
+                    folders={(folders || []).filter((f) => !f.no_select && f.name !== folder)}
+                    moveMenu={moveMenu}
+                    onMoveMenu={setMoveMenu}
+                    onClear={() => setSelected(new Set())}
+                    onSelectAll={() => setSelected(selected.size === list.messages.length ? new Set() : new Set(list.messages.map((m) => m.uid)))}
+                    onSeen={(v) => setFlags(Array.from(selected), 'seen', v)}
+                    onFlag={(v) => setFlags(Array.from(selected), 'flagged', v)}
+                    onMove={(f) => {
+                        setMoveMenu(false);
+                        moveMany(Array.from(selected), {to: f.name}, folderTitle(f));
+                    }}
+                    onSpam={() => toSpam(Array.from(selected))}
+                    onDelete={() => {
+                        // eslint-disable-next-line no-alert
+                        if ((current?.role === 'trash' || !trash) && !window.confirm(`Удалить навсегда ${pluralMessages(selected.size)}?`)) {
+                            return;
+                        }
+                        removeMany(Array.from(selected));
+                    }}
+                />
+            )}
+            <div className={`mml-mb-header ${selected.size > 0 && list ? 'mml-hidden' : ''}`}>
                 <div className='mml-mb-header__row'>
                     <button
                         type='button'
                         className='mml-icon-btn mml-icon-btn--lg'
-                        title='Папки'
+                        title='Папки (перетащите сюда письмо, чтобы переложить его)'
                         aria-label='Папки'
                         onClick={() => setDrawerOpen(true)}
+                        onDragEnter={(e) => {
+                            if (isMailDrag(e)) {
+                                setDrawerOpen(true);
+                            }
+                        }}
+                        onDragOver={(e) => {
+                            if (isMailDrag(e)) {
+                                e.preventDefault();
+                                setDrawerOpen(true);
+                            }
+                        }}
                     >
                         <MenuIcon size={22}/>
                     </button>
@@ -555,6 +760,80 @@ function Mailbox({me}: {me: Me}) {
                         )}
                     </div>
                     <span className='mml-mb-header__spacer'/>
+                    <div className='mml-menu-anchor'>
+                        <button
+                            type='button'
+                            className='mml-icon-btn mml-icon-btn--lg'
+                            title='Действия с папкой'
+                            aria-label='Действия с папкой'
+                            aria-expanded={moreMenu}
+                            onClick={() => setMoreMenu(!moreMenu)}
+                        >
+                            <MoreVerticalIcon size={20}/>
+                        </button>
+                        {moreMenu && (
+                            <ul
+                                className='mml-menu'
+                                role='menu'
+                                onMouseLeave={() => setMoreMenu(false)}
+                            >
+                                <li>
+                                    <button
+                                        type='button'
+                                        role='menuitem'
+                                        disabled={!unseenCount}
+                                        onClick={() => folderAction('read')}
+                                    >
+                                        <CheckAllIcon size={16}/>
+                                        {'Прочитать все'}
+                                    </button>
+                                </li>
+                                {list && list.messages.length > 0 && (
+                                    <li>
+                                        <button
+                                            type='button'
+                                            role='menuitem'
+                                            onClick={() => {
+                                                setMoreMenu(false);
+                                                setSelected(new Set(list.messages.map((m) => m.uid)));
+                                            }}
+                                        >
+                                            <CheckIcon size={16}/>
+                                            {'Выбрать письма'}
+                                        </button>
+                                    </li>
+                                )}
+                                {(current?.role === 'trash' || current?.role === 'junk') && (
+                                    <li>
+                                        <button
+                                            type='button'
+                                            role='menuitem'
+                                            className='mml-menu__item--danger'
+                                            disabled={!current.total}
+                                            onClick={() => folderAction('empty')}
+                                        >
+                                            <TrashIcon size={16}/>
+                                            {current.role === 'trash' ? 'Очистить корзину' : 'Очистить спам'}
+                                        </button>
+                                    </li>
+                                )}
+                                <li>
+                                    <button
+                                        type='button'
+                                        role='menuitem'
+                                        onClick={() => {
+                                            setMoreMenu(false);
+                                            setDrawerCreate(true);
+                                            setDrawerOpen(true);
+                                        }}
+                                    >
+                                        <FolderPlusIcon size={16}/>
+                                        {'Новая папка'}
+                                    </button>
+                                </li>
+                            </ul>
+                        )}
+                    </div>
                     <button
                         type='button'
                         className={`mml-icon-btn mml-icon-btn--lg ${searchOpen ? 'mml-icon-btn--on' : ''}`}
@@ -685,6 +964,25 @@ function Mailbox({me}: {me: Me}) {
                     current={folder}
                     filter={filter}
                     webUrl={webUrl}
+                    startCreate={drawerCreate}
+                    dragging={dragging}
+                    onChanged={() => {
+                        loadFolders();
+                        mailChanged();
+                    }}
+                    onDrop={(f, data) => {
+                        setDragging(false);
+                        setDrawerOpen(false);
+                        if (data.folder === folder) {
+                            moveMany(data.uids, {to: f.name}, folderTitle(f));
+                        }
+                    }}
+                    onCreateSpam={async () => {
+                        const res = await api.createFolder('Спам');
+                        loadFolders();
+                        setFilter('');
+                        setFolder(res.name);
+                    }}
                     onFolder={(name) => {
                         setFilter('');
                         setFolder(name);
@@ -697,32 +995,240 @@ function Mailbox({me}: {me: Me}) {
                         setFilter(f);
                         setDrawerOpen(false);
                     }}
-                    onClose={() => setDrawerOpen(false)}
+                    onClose={() => {
+                        setDrawerOpen(false);
+                        setDrawerCreate(false);
+                    }}
                 />
             )}
         </div>
     );
 }
 
-function FolderDrawer({me, folders, current, filter, webUrl, onFolder, onFilter, onClose}: {
+type FolderEdit = {mode: 'create'; parent?: Folder} | {mode: 'rename'; folder: Folder};
+
+function FolderDrawer({me, folders, current, filter, webUrl, startCreate, dragging, onChanged, onDrop, onCreateSpam, onFolder, onFilter, onClose}: {
     me: Me;
     folders: Folder[] | null;
     current: string;
     filter: MessageFilter | '';
     webUrl: string;
+    startCreate: boolean;
+    dragging: boolean;
+    onChanged: () => void;
+    onDrop: (f: Folder, data: DragData) => void;
+    onCreateSpam: () => Promise<void>;
     onFolder: (name: string) => void;
     onFilter: (f: MessageFilter) => void;
     onClose: () => void;
 }) {
     const ref = React.useRef<HTMLElement>(null);
+    const [edit, setEdit] = React.useState<FolderEdit | null>(startCreate ? {mode: 'create'} : null);
+    const [menuFor, setMenuFor] = React.useState('');
+    const [busy, setBusy] = React.useState(false);
+    const [error, setError] = React.useState('');
+    const [dropOn, setDropOn] = React.useState('');
     React.useEffect(() => {
-        ref.current?.focus();
-    }, []);
+        if (!startCreate) {
+            ref.current?.focus();
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
     const inboxUnseen = folders?.find((f) => f.role === 'inbox')?.unseen || 0;
+    const hasJunk = folders?.some((f) => f.role === 'junk');
     const account: Address = {email: me.email || '', name: me.display_name};
+
+    const run = async (fn: () => Promise<unknown>) => {
+        setBusy(true);
+        setError('');
+        try {
+            await fn();
+            setEdit(null);
+            onChanged();
+        } catch (e) {
+            setError((e as Error).message);
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const submit = (name: string) => {
+        if (!edit) {
+            return;
+        }
+        if (edit.mode === 'rename') {
+            if (name === edit.folder.display) {
+                setEdit(null);
+                return;
+            }
+            run(() => api.renameFolder(edit.folder.name, name));
+        } else {
+            run(() => api.createFolder(name, edit.parent?.name || ''));
+        }
+    };
+
+    const remove = (f: Folder) => {
+        setMenuFor('');
+        const what = f.total ? ` Письма в ней (${f.total}) будут удалены.` : '';
+        // eslint-disable-next-line no-alert
+        if (!window.confirm(`Удалить папку «${f.display}»?${what}`)) {
+            return;
+        }
+        run(() => api.deleteFolder(f.name));
+    };
+
+    const nameInput = (key: string, depth: number, initial: string, placeholder: string) => (
+        <li key={key}>
+            <FolderNameInput
+                initial={initial}
+                placeholder={placeholder}
+                depth={depth}
+                busy={busy}
+                onSubmit={submit}
+                onCancel={() => {
+                    setEdit(null);
+                    setError('');
+                }}
+            />
+        </li>
+    );
+
+    // Folders that take dropped messages: any real folder but the open one.
+    const dropProps = (f: Folder) => (f.no_select || f.name === current ? {} : {
+        onDragOver: (e: React.DragEvent) => {
+            if (isMailDrag(e)) {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                setDropOn(f.name);
+            }
+        },
+        onDragLeave: () => setDropOn((prev) => (prev === f.name ? '' : prev)),
+        onDrop: (e: React.DragEvent) => {
+            const data = readDrag(e);
+            setDropOn('');
+            if (data) {
+                e.preventDefault();
+                onDrop(f, data);
+            }
+        },
+    });
+
+    const items: React.ReactNode[] = [];
+    for (const f of folders || []) {
+        const on = f.name === current && !filter;
+        const custom = !f.role;
+        if (edit?.mode === 'rename' && edit.folder.name === f.name) {
+            items.push(nameInput(`edit-${f.name}`, f.depth, f.display, 'Название папки'));
+        } else {
+            items.push(
+                <li
+                    key={f.name}
+                    className={`mml-drawer__row ${dropOn === f.name ? 'mml-drawer__row--drop' : ''}`}
+                    {...dropProps(f)}
+                >
+                    <button
+                        type='button'
+                        className={`mml-drawer__item ${on ? 'mml-drawer__item--on' : ''}`}
+                        style={{paddingLeft: 16 + (f.depth * 28)}}
+                        disabled={f.no_select}
+                        aria-current={on ? 'page' : undefined}
+                        onClick={() => onFolder(f.name)}
+                    >
+                        <FolderGlyph
+                            role={f.role}
+                            size={20}
+                        />
+                        <span className='mml-ellipsis'>{folderTitle(f)}</span>
+                        {f.unseen > 0 && <span className='mml-drawer__count'>{f.unseen}</span>}
+                    </button>
+                    {custom && !dragging && (
+                        <div className='mml-menu-anchor mml-drawer__more'>
+                            <button
+                                type='button'
+                                className='mml-icon-btn'
+                                title='Действия с папкой'
+                                aria-label={`Действия с папкой ${f.display}`}
+                                aria-expanded={menuFor === f.name}
+                                onClick={() => setMenuFor(menuFor === f.name ? '' : f.name)}
+                            >
+                                <MoreVerticalIcon size={16}/>
+                            </button>
+                            {menuFor === f.name && (
+                                <ul
+                                    className='mml-menu'
+                                    role='menu'
+                                    onMouseLeave={() => setMenuFor('')}
+                                >
+                                    <li>
+                                        <button
+                                            type='button'
+                                            role='menuitem'
+                                            onClick={() => {
+                                                setMenuFor('');
+                                                setEdit({mode: 'rename', folder: f});
+                                            }}
+                                        >
+                                            <PenIcon size={16}/>
+                                            {'Переименовать'}
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button
+                                            type='button'
+                                            role='menuitem'
+                                            onClick={() => {
+                                                setMenuFor('');
+                                                setEdit({mode: 'create', parent: f});
+                                            }}
+                                        >
+                                            <FolderPlusIcon size={16}/>
+                                            {'Вложенная папка'}
+                                        </button>
+                                    </li>
+                                    <li>
+                                        <button
+                                            type='button'
+                                            role='menuitem'
+                                            className='mml-menu__item--danger'
+                                            onClick={() => remove(f)}
+                                        >
+                                            <TrashIcon size={16}/>
+                                            {'Удалить'}
+                                        </button>
+                                    </li>
+                                </ul>
+                            )}
+                        </div>
+                    )}
+                </li>,
+            );
+        }
+        if (edit?.mode === 'create' && edit.parent?.name === f.name) {
+            items.push(nameInput(`new-in-${f.name}`, f.depth + 1, '', `Папка в «${f.display}»`));
+        }
+
+        // Spam right after the special folders, even if the mailbox has
+        // none yet: it is created on the first click.
+        if (folders && !hasJunk && f.role && !folders[folders.indexOf(f) + 1]?.role) {
+            items.push(
+                <li key='virtual-junk'>
+                    <button
+                        type='button'
+                        className='mml-drawer__item'
+                        disabled={busy}
+                        onClick={() => run(onCreateSpam)}
+                    >
+                        <SpamIcon size={20}/>
+                        <span className='mml-ellipsis'>{'Спам'}</span>
+                    </button>
+                </li>,
+            );
+        }
+    }
+
     return (
         <div
-            className='mml-drawer'
+            className={`mml-drawer ${dragging ? 'mml-drawer--dragging' : ''}`}
             onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                     e.stopPropagation();
@@ -733,6 +1239,12 @@ function FolderDrawer({me, folders, current, filter, webUrl, onFolder, onFilter,
             <div
                 className='mml-drawer__backdrop'
                 onClick={onClose}
+                onDragOver={(e) => {
+                    // Dragging back to the list closes the drawer.
+                    if (isMailDrag(e)) {
+                        onClose();
+                    }
+                }}
             />
             <nav
                 className='mml-drawer__sheet'
@@ -757,79 +1269,279 @@ function FolderDrawer({me, folders, current, filter, webUrl, onFolder, onFilter,
                     <span className='mml-drawer__email mml-ellipsis'>{me.email}</span>
                     {inboxUnseen > 0 && <span className='mml-drawer__total'>{inboxUnseen}</span>}
                 </div>
+                {dragging && <div className='mml-drawer__hint'>{'Отпустите письмо над папкой'}</div>}
                 {!folders && <div className='mml-center'><Spinner/></div>}
                 <ul className='mml-drawer__list'>
-                    {folders?.map((f) => {
-                        const on = f.name === current && !filter;
-                        return (
-                            <li key={f.name}>
-                                <button
-                                    type='button'
-                                    className={`mml-drawer__item ${on ? 'mml-drawer__item--on' : ''}`}
-                                    style={{paddingLeft: 16 + (f.depth * 28)}}
-                                    disabled={f.no_select}
-                                    aria-current={on ? 'page' : undefined}
-                                    onClick={() => onFolder(f.name)}
-                                >
-                                    <FolderGlyph
-                                        role={f.role}
-                                        size={20}
-                                    />
-                                    <span className='mml-ellipsis'>{folderTitle(f)}</span>
-                                    {f.unseen > 0 && <span className='mml-drawer__count'>{f.unseen}</span>}
-                                </button>
-                            </li>
-                        );
-                    })}
-                </ul>
-                <div className='mml-drawer__section'>{'Фильтр во «Входящих»'}</div>
-                <ul className='mml-drawer__list'>
-                    {FILTERS.map((f) => (
-                        <li key={f.id}>
+                    {items}
+                    {edit?.mode === 'create' && !edit.parent && nameInput('new-root', 0, '', 'Новая папка')}
+                    {folders && !dragging && !(edit?.mode === 'create' && !edit.parent) && (
+                        <li>
                             <button
                                 type='button'
-                                className={`mml-drawer__item ${filter === f.id ? 'mml-drawer__item--on' : ''}`}
-                                onClick={() => onFilter(f.id)}
+                                className='mml-drawer__item mml-drawer__item--add'
+                                onClick={() => {
+                                    setError('');
+                                    setEdit({mode: 'create'});
+                                }}
                             >
-                                {f.id === 'unseen' && <span className='mml-drawer__dot'/>}
-                                {f.id === 'flagged' && (
-                                    <span className='mml-drawer__flag'>
-                                        <BookmarkIcon
-                                            size={20}
-                                            filled={true}
-                                        />
-                                    </span>
-                                )}
-                                {f.id === 'attachments' && <PaperclipIcon size={20}/>}
-                                <span>{f.drawer}</span>
+                                <PlusIcon size={20}/>
+                                <span>{'Новая папка'}</span>
                             </button>
                         </li>
-                    ))}
+                    )}
                 </ul>
-                <div className='mml-drawer__footer'>
+                {error && <div className='mml-drawer__error'>{error}</div>}
+                {!dragging && (
+                    <>
+                        <div className='mml-drawer__section'>{'Фильтр во «Входящих»'}</div>
+                        <ul className='mml-drawer__list'>
+                            {FILTERS.map((f) => (
+                                <li key={f.id}>
+                                    <button
+                                        type='button'
+                                        className={`mml-drawer__item ${filter === f.id ? 'mml-drawer__item--on' : ''}`}
+                                        onClick={() => onFilter(f.id)}
+                                    >
+                                        {f.id === 'unseen' && <span className='mml-drawer__dot'/>}
+                                        {f.id === 'flagged' && (
+                                            <span className='mml-drawer__flag'>
+                                                <BookmarkIcon
+                                                    size={20}
+                                                    filled={true}
+                                                />
+                                            </span>
+                                        )}
+                                        {f.id === 'attachments' && <PaperclipIcon size={20}/>}
+                                        <span>{f.drawer}</span>
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
+                        <div className='mml-drawer__footer'>
+                            <button
+                                type='button'
+                                className='mml-drawer__item'
+                                onClick={() => {
+                                    onClose();
+                                    openWizard('settings');
+                                }}
+                            >
+                                <GearIcon size={20}/>
+                                <span>{'Настройки почты'}</span>
+                            </button>
+                            {webUrl && (
+                                <button
+                                    type='button'
+                                    className='mml-drawer__item'
+                                    onClick={() => openInBrowser(webUrl)}
+                                >
+                                    <ExternalIcon size={20}/>
+                                    <span>{webmailLabel(me.provider)}</span>
+                                </button>
+                            )}
+                        </div>
+                    </>
+                )}
+            </nav>
+        </div>
+    );
+}
+
+function FolderNameInput({initial, placeholder, depth, busy, onSubmit, onCancel}: {
+    initial: string;
+    placeholder: string;
+    depth: number;
+    busy: boolean;
+    onSubmit: (name: string) => void;
+    onCancel: () => void;
+}) {
+    const [value, setValue] = React.useState(initial);
+
+    // autoFocus focuses the field in the same commit: the button that
+    // opened it is gone, and Mattermost sends keys typed with no focus to
+    // the message box.
+    return (
+        <form
+            className='mml-drawer__edit'
+            style={{paddingLeft: 16 + (depth * 28)}}
+            onSubmit={(e) => {
+                e.preventDefault();
+                if (value.trim()) {
+                    onSubmit(value.trim());
+                }
+            }}
+        >
+            <FolderIcon size={20}/>
+            <input
+                autoFocus={true}
+                onFocus={(e) => e.target.select()}
+                className='mml-input mml-drawer__input'
+                value={value}
+                maxLength={100}
+                placeholder={placeholder}
+                disabled={busy}
+                aria-label={placeholder}
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                        e.stopPropagation();
+                        onCancel();
+                    }
+                }}
+            />
+            <button
+                type='submit'
+                className='mml-icon-btn mml-icon-btn--accent-plain'
+                aria-label='Сохранить'
+                disabled={busy || !value.trim()}
+            >
+                {busy ? <Spinner size={14}/> : <CheckIcon size={18}/>}
+            </button>
+            <button
+                type='button'
+                className='mml-icon-btn'
+                aria-label='Отмена'
+                disabled={busy}
+                onClick={onCancel}
+            >
+                <CloseIcon size={16}/>
+            </button>
+        </form>
+    );
+}
+
+// setDragImage shows a compact "letter" under the cursor instead of a
+// screenshot of the whole row.
+function setDragImage(e: React.DragEvent, label: string) {
+    const ghost = document.createElement('div');
+    ghost.className = 'mml-drag-ghost';
+    ghost.textContent = `✉  ${label}`;
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 12, 12);
+    window.setTimeout(() => ghost.remove(), 0);
+}
+
+function SelectionBar({count, allSelected, anyUnseen, anyUnflagged, inTrash, inJunk, spamAllowed, folders, moveMenu, onMoveMenu, onClear, onSelectAll, onSeen, onFlag, onMove, onSpam, onDelete}: {
+    count: number;
+    allSelected: boolean;
+    anyUnseen: boolean;
+    anyUnflagged: boolean;
+    inTrash: boolean;
+    inJunk: boolean;
+    spamAllowed: boolean;
+    folders: Folder[];
+    moveMenu: boolean;
+    onMoveMenu: (open: boolean) => void;
+    onClear: () => void;
+    onSelectAll: () => void;
+    onSeen: (v: boolean) => void;
+    onFlag: (v: boolean) => void;
+    onMove: (f: Folder) => void;
+    onSpam: () => void;
+    onDelete: () => void;
+}) {
+    return (
+        <div
+            className='mml-selbar'
+            role='toolbar'
+            aria-label='Выбранные письма'
+        >
+            <div className='mml-selbar__row'>
+                <button
+                    type='button'
+                    className='mml-icon-btn mml-icon-btn--lg'
+                    title='Снять выделение (Esc)'
+                    aria-label='Снять выделение'
+                    onClick={onClear}
+                >
+                    <CloseIcon size={20}/>
+                </button>
+                <span className='mml-selbar__count'>{`Выбрано: ${count}`}</span>
+                <span className='mml-mb-header__spacer'/>
+                <button
+                    type='button'
+                    className='mml-link mml-small'
+                    onClick={onSelectAll}
+                >
+                    {allSelected ? 'Снять все' : 'Выбрать все'}
+                </button>
+            </div>
+            <div className='mml-selbar__row mml-selbar__actions'>
+                <button
+                    type='button'
+                    className='mml-icon-btn mml-icon-btn--lg'
+                    title={anyUnseen ? 'Прочитано' : 'Не прочитано'}
+                    aria-label={anyUnseen ? 'Отметить прочитанными' : 'Отметить непрочитанными'}
+                    onClick={() => onSeen(anyUnseen)}
+                >
+                    {anyUnseen ? <MailOpenIcon size={20}/> : <MailIcon size={20}/>}
+                </button>
+                <button
+                    type='button'
+                    className='mml-icon-btn mml-icon-btn--lg'
+                    title={anyUnflagged ? 'Пометить флажком' : 'Снять флажок'}
+                    aria-label={anyUnflagged ? 'Пометить флажком' : 'Снять флажок'}
+                    onClick={() => onFlag(anyUnflagged)}
+                >
+                    <BookmarkIcon
+                        size={20}
+                        filled={!anyUnflagged}
+                    />
+                </button>
+                <div className='mml-menu-anchor'>
                     <button
                         type='button'
-                        className='mml-drawer__item'
-                        onClick={() => {
-                            onClose();
-                            openWizard('settings');
-                        }}
+                        className='mml-icon-btn mml-icon-btn--lg'
+                        title='Переместить в папку'
+                        aria-label='Переместить в папку'
+                        aria-expanded={moveMenu}
+                        onClick={() => onMoveMenu(!moveMenu)}
                     >
-                        <GearIcon size={20}/>
-                        <span>{'Настройки почты'}</span>
+                        <MoveIcon size={20}/>
                     </button>
-                    {webUrl && (
-                        <button
-                            type='button'
-                            className='mml-drawer__item'
-                            onClick={() => openInBrowser(webUrl)}
+                    {moveMenu && (
+                        <ul
+                            className='mml-menu mml-menu--left mml-menu--scroll'
+                            role='menu'
+                            onMouseLeave={() => onMoveMenu(false)}
                         >
-                            <ExternalIcon size={20}/>
-                            <span>{webmailLabel(me.provider)}</span>
-                        </button>
+                            {folders.map((f) => (
+                                <li key={f.name}>
+                                    <button
+                                        type='button'
+                                        role='menuitem'
+                                        style={{paddingLeft: 12 + (f.depth * 16)}}
+                                        onClick={() => onMove(f)}
+                                    >
+                                        <FolderGlyph role={f.role}/>
+                                        <span className='mml-ellipsis'>{folderTitle(f)}</span>
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
                     )}
                 </div>
-            </nav>
+                {spamAllowed && (
+                    <button
+                        type='button'
+                        className='mml-icon-btn mml-icon-btn--lg'
+                        title={inJunk ? 'Не спам' : 'В спам'}
+                        aria-label={inJunk ? 'Не спам' : 'В спам'}
+                        onClick={onSpam}
+                    >
+                        {inJunk ? <InboxIcon size={20}/> : <ThumbDownIcon size={20}/>}
+                    </button>
+                )}
+                <button
+                    type='button'
+                    className='mml-icon-btn mml-icon-btn--lg mml-icon-btn--danger'
+                    title={inTrash ? 'Удалить навсегда' : 'В корзину'}
+                    aria-label={inTrash ? 'Удалить навсегда' : 'В корзину'}
+                    onClick={onDelete}
+                >
+                    <TrashIcon size={20}/>
+                </button>
+            </div>
         </div>
     );
 }
@@ -879,30 +1591,64 @@ function SearchBox({onSearch, folderName}: {onSearch: (q: string) => void; folde
     );
 }
 
-function MessageRow({m, avatars, sentFolder, inTrash, active, onOpen, onToggle, onDelete}: {
+function MessageRow({m, avatars, sentFolder, inTrash, inJunk, spamAllowed, active, selected, selecting, onOpen, onSelect, onToggle, onDelete, onSpam, onDragStart, onDragEnd}: {
     m: MessageSummary;
     avatars: Record<string, string>;
     sentFolder: boolean;
     inTrash: boolean;
+    inJunk: boolean;
+    spamAllowed: boolean;
     active: boolean;
+    selected: boolean;
+    selecting: boolean;
     onOpen: () => void;
+    onSelect: () => void;
     onToggle: (flag: 'seen' | 'flagged') => void;
     onDelete: () => void;
+    onSpam: () => void;
+    onDragStart: (e: React.DragEvent) => void;
+    onDragEnd: () => void;
 }) {
     // In "Sent" the interesting person is the recipient.
     const person = sentFolder ? m.to[0] : m.from[0];
     const name = sentFolder ? `Кому: ${addressLabel(person) || '—'}` : addressLabel(person) || '(без отправителя)';
     return (
-        <li className={`mml-message ${m.seen ? '' : 'mml-message--unseen'} ${active ? 'mml-message--active' : ''}`}>
+        <li
+            className={`mml-message ${m.seen ? '' : 'mml-message--unseen'} ${active ? 'mml-message--active' : ''} ${selected ? 'mml-message--selected' : ''}`}
+            draggable={true}
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+        >
+            <button
+                type='button'
+                className={`mml-message__pick ${selecting ? 'mml-message__pick--on' : ''}`}
+                title={selected ? 'Снять выделение' : 'Выбрать'}
+                aria-label={selected ? 'Снять выделение' : 'Выбрать письмо'}
+                aria-pressed={selected}
+                onClick={onSelect}
+            >
+                {selected ? (
+                    <span className='mml-message__check'>
+                        <CheckIcon size={20}/>
+                    </span>
+                ) : (
+                    <Avatar
+                        address={person}
+                        avatars={avatars}
+                    />
+                )}
+            </button>
             <button
                 type='button'
                 className='mml-message__main'
                 onClick={onOpen}
+                onKeyDown={(e) => {
+                    if (e.key === ' ' && (e.shiftKey || selecting)) {
+                        e.preventDefault();
+                        onSelect();
+                    }
+                }}
             >
-                <Avatar
-                    address={person}
-                    avatars={avatars}
-                />
                 <span className='mml-message__body'>
                     <span className='mml-message__top'>
                         {!m.seen && <span className='mml-message__dot'/>}
@@ -961,6 +1707,17 @@ function MessageRow({m, avatars, sentFolder, inTrash, active, onOpen, onToggle, 
                         filled={m.flagged}
                     />
                 </button>
+                {spamAllowed && (
+                    <button
+                        type='button'
+                        className='mml-icon-btn'
+                        title={inJunk ? 'Не спам — во «Входящие»' : 'В спам'}
+                        aria-label={inJunk ? 'Не спам' : 'В спам'}
+                        onClick={onSpam}
+                    >
+                        {inJunk ? <InboxIcon size={14}/> : <ThumbDownIcon size={14}/>}
+                    </button>
+                )}
                 <button
                     type='button'
                     className='mml-icon-btn mml-icon-btn--danger'

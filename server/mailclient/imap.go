@@ -3,6 +3,7 @@ package mailclient
 import (
 	"context"
 	"errors"
+	"fmt"
 	"mime"
 	"net"
 	"sort"
@@ -142,6 +143,8 @@ type Folder struct {
 	Unseen   int    `json:"unseen"`
 	Total    int    `json:"total"`
 	NoSelect bool   `json:"no_select,omitempty"`
+	// Delim separates levels of nested folders, e.g. "/" or ".".
+	Delim string `json:"delim,omitempty"`
 }
 
 // roleNames recognise special folders on servers without SPECIAL-USE.
@@ -190,6 +193,7 @@ func (m *IMAP) Folders(ctx context.Context) ([]Folder, error) {
 	for _, data := range list {
 		f := Folder{Name: data.Mailbox, Display: data.Mailbox}
 		if data.Delim != 0 {
+			f.Delim = string(data.Delim)
 			parts := strings.Split(data.Mailbox, string(data.Delim))
 			f.Display = parts[len(parts)-1]
 			f.Depth = len(parts) - 1
@@ -672,6 +676,24 @@ func (m *IMAP) Delete(ctx context.Context, folder string, uids []uint32) (perman
 	return true, err
 }
 
+// DeleteForever removes messages without moving them to the trash, e.g. a
+// draft replaced by its newer version.
+func (m *IMAP) DeleteForever(ctx context.Context, folder string, uids []uint32) error {
+	if err := m.ensureSelected(ctx, folder, true); err != nil {
+		return err
+	}
+	set := toUIDSet(uids)
+	return m.do(ctx, "delete", func() error {
+		if err := m.client.Store(set, &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close(); err != nil {
+			return err
+		}
+		if m.client.Caps().Has(imap.CapUIDPlus) {
+			return m.client.UIDExpunge(set).Close()
+		}
+		return m.client.Expunge().Close()
+	})
+}
+
 // Append stores a raw message, e.g. a copy of a sent message in "Sent".
 func (m *IMAP) Append(ctx context.Context, folder string, raw []byte, flags []string) error {
 	var imapFlags []imap.Flag
@@ -698,4 +720,157 @@ func toUIDSet(uids []uint32) imap.UIDSet {
 		list = append(list, imap.UID(u))
 	}
 	return imap.UIDSetNum(list...)
+}
+
+// Delimiter returns the hierarchy separator of the server ("/" if unknown).
+func (m *IMAP) Delimiter(ctx context.Context) (string, error) {
+	if m.folders == nil {
+		if _, err := m.Folders(ctx); err != nil {
+			return "", err
+		}
+	}
+	for _, f := range m.folders {
+		if f.Delim != "" {
+			return f.Delim, nil
+		}
+	}
+	return "/", nil
+}
+
+// CreateFolder creates a folder; parent may be empty for a top-level one.
+func (m *IMAP) CreateFolder(ctx context.Context, parent, name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", newError(CodeUnknown, "create", errors.New("empty folder name"))
+	}
+	full := name
+	if parent != "" {
+		delim, err := m.Delimiter(ctx)
+		if err != nil {
+			return "", err
+		}
+		if strings.Contains(name, delim) {
+			return "", newError(CodeUnknown, "create", fmt.Errorf("folder name must not contain %q", delim))
+		}
+		full = parent + delim + name
+	}
+	m.folders = nil
+	err := m.do(ctx, "create", func() error {
+		if err := m.client.Create(full, nil).Wait(); err != nil {
+			return err
+		}
+		// Some servers only show subscribed folders in other clients.
+		_ = m.client.Subscribe(full).Wait()
+		return nil
+	})
+	return full, err
+}
+
+// RenameFolder renames a folder in place, keeping its parent.
+func (m *IMAP) RenameFolder(ctx context.Context, name, newName string) (string, error) {
+	newName = strings.TrimSpace(newName)
+	if newName == "" {
+		return "", newError(CodeUnknown, "rename", errors.New("empty folder name"))
+	}
+	delim, err := m.Delimiter(ctx)
+	if err != nil {
+		return "", err
+	}
+	if strings.Contains(newName, delim) {
+		return "", newError(CodeUnknown, "rename", fmt.Errorf("folder name must not contain %q", delim))
+	}
+	full := newName
+	if i := strings.LastIndex(name, delim); i >= 0 {
+		full = name[:i+len(delim)] + newName
+	}
+	if m.selected == name {
+		m.selected = ""
+		_ = m.do(ctx, "unselect", func() error { return m.client.Unselect().Wait() })
+	}
+	m.folders = nil
+	err = m.do(ctx, "rename", func() error {
+		if err := m.client.Rename(name, full, nil).Wait(); err != nil {
+			return err
+		}
+		_ = m.client.Unsubscribe(name).Wait()
+		_ = m.client.Subscribe(full).Wait()
+		return nil
+	})
+	return full, err
+}
+
+// DeleteFolder removes a folder with its messages.
+func (m *IMAP) DeleteFolder(ctx context.Context, name string) error {
+	if m.selected == name {
+		m.selected = ""
+		_ = m.do(ctx, "unselect", func() error { return m.client.Unselect().Wait() })
+	}
+	m.folders = nil
+	return m.do(ctx, "delete folder", func() error {
+		_ = m.client.Unsubscribe(name).Wait()
+		return m.client.Delete(name).Wait()
+	})
+}
+
+// EnsureFolder returns the folder with the role, creating it under the
+// given name when the server has none (e.g. "Спам" on a bare server).
+func (m *IMAP) EnsureFolder(ctx context.Context, role, name string) (string, error) {
+	folder, err := m.FolderByRole(ctx, role)
+	if err != nil || folder != "" {
+		return folder, err
+	}
+	return m.CreateFolder(ctx, "", name)
+}
+
+func allMessages() imap.SeqSet {
+	var set imap.SeqSet
+	set.AddRange(1, 0) // 1:*
+	return set
+}
+
+// MarkAllSeen marks every message of the folder as read.
+func (m *IMAP) MarkAllSeen(ctx context.Context, folder string) error {
+	data, err := m.selectFolder(ctx, folder, false)
+	if err != nil || data.NumMessages == 0 {
+		return err
+	}
+	return m.do(ctx, "store", func() error {
+		return m.client.Store(allMessages(), &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagSeen}}, nil).Close()
+	})
+}
+
+// EmptyFolder deletes every message of the folder for good (Trash, Spam).
+func (m *IMAP) EmptyFolder(ctx context.Context, folder string) error {
+	data, err := m.selectFolder(ctx, folder, false)
+	if err != nil || data.NumMessages == 0 {
+		return err
+	}
+	return m.do(ctx, "empty", func() error {
+		if err := m.client.Store(allMessages(), &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close(); err != nil {
+			return err
+		}
+		return m.client.Expunge().Close()
+	})
+}
+
+// AppendDraft saves a draft and returns its UID when the server reports it
+// (UIDPLUS), 0 otherwise.
+func (m *IMAP) AppendDraft(ctx context.Context, folder string, raw []byte) (uint32, error) {
+	var uid uint32
+	err := m.do(ctx, "append", func() error {
+		cmd := m.client.Append(folder, int64(len(raw)), &imap.AppendOptions{Flags: []imap.Flag{imap.FlagDraft, imap.FlagSeen}, Time: time.Now()})
+		if _, err := cmd.Write(raw); err != nil {
+			_ = cmd.Close()
+			return err
+		}
+		if err := cmd.Close(); err != nil {
+			return err
+		}
+		data, err := cmd.Wait()
+		if err == nil && data != nil {
+			uid = uint32(data.UID)
+		}
+		return err
+	})
+	return uid, err
 }

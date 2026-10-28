@@ -92,6 +92,12 @@ export function attachmentUrl(folder: string, uid: number, part: string, inline 
     return `${baseUrl()}/attachment${q({folder, uid, part, inline: inline ? 1 : undefined})}`;
 }
 
+// signatureImageUrl shows the stored signature picture; the version
+// parameter defeats the browser cache after it is replaced.
+export function signatureImageUrl(version: number | string = '') {
+    return `${baseUrl()}/signature-image${q({v: version})}`;
+}
+
 export const api = {
     config: () => request<PluginConfig>('GET', '/config'),
     me: () => request<Me>('GET', '/me'),
@@ -118,6 +124,17 @@ export const api = {
     remove: (folder: string, uids: number[]) =>
         request<{ok: boolean; permanent: boolean}>('POST', '/delete', {folder, uids}),
     send: (req: SendRequest) => request<{ok: boolean; message_id: string}>('POST', '/send', req),
+    saveDraft: (req: SendRequest) => request<{ok: boolean; folder: string; uid: number}>('POST', '/drafts', req),
+
+    createFolder: (name: string, parent = '') => request<{ok: boolean; name: string}>('POST', '/folders/create', {name, parent}),
+    renameFolder: (name: string, newName: string) => request<{ok: boolean; name: string}>('POST', '/folders/rename', {name, new_name: newName}),
+    deleteFolder: (name: string) => request<{ok: boolean}>('POST', '/folders/delete', {name}),
+    readAll: (folder: string) => request<{ok: boolean}>('POST', '/folders/read', {folder}),
+    emptyFolder: (folder: string) => request<{ok: boolean}>('POST', '/folders/empty', {folder}),
+
+    saveSignatureImage: (dataUrl: string) => request<Me>('PUT', '/signature-image', {data_url: dataUrl}),
+    deleteSignatureImage: () => request<Me>('POST', '/signature-image/delete'),
+
     share: (folder: string, uid: number, channelId: string, rootId: string, comment: string, withFile: boolean) =>
         request<{ok: boolean; post_id: string}>('POST', '/share', {folder, uid, channel_id: channelId, root_id: rootId, comment, with_file: withFile}),
 

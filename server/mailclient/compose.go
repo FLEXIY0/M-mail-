@@ -12,10 +12,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/emersion/go-message"
 	"github.com/emersion/go-message/mail"
+	"github.com/emersion/go-message/textproto"
 	"github.com/emersion/go-sasl"
 	"github.com/emersion/go-smtp"
 )
+
+// InlineImage is a picture referenced from the HTML body as cid:ContentID,
+// e.g. the photo in a signature. Unlike data: URLs, such pictures are
+// shown by Mail.ru, Gmail and Outlook alike.
+type InlineImage struct {
+	ContentID   string
+	ContentType string
+	Filename    string
+	Data        []byte
+}
 
 // OutgoingAttachment is a file attached to a new message.
 type OutgoingAttachment struct {
@@ -38,7 +50,11 @@ type Outgoing struct {
 	InReplyTo   string
 	References  []string
 	Attachments []OutgoingAttachment
+	Inline      []InlineImage
 	Date        time.Time
+	// KeepBcc writes Bcc into the headers: drafts must remember it, sent
+	// messages must not show it.
+	KeepBcc bool
 }
 
 // Recipients returns every envelope recipient, deduplicated.
@@ -82,6 +98,9 @@ func (o *Outgoing) Build() ([]byte, string, error) {
 	if len(o.Cc) > 0 {
 		h.SetAddressList("Cc", toMailAddresses(o.Cc))
 	}
+	if o.KeepBcc && len(o.Bcc) > 0 {
+		h.SetAddressList("Bcc", toMailAddresses(o.Bcc))
+	}
 	h.SetSubject(o.Subject)
 	domain := "mattermost.local"
 	if at := strings.LastIndex(o.From.Email, "@"); at >= 0 && at < len(o.From.Email)-1 {
@@ -101,105 +120,118 @@ func (o *Outgoing) Build() ([]byte, string, error) {
 	h.Set("User-Agent", "Mattermost Mail Plugin")
 
 	text := normalizeNewlines(o.Text)
+	html := normalizeNewlines(o.HTML)
+
+	// The body is a tree: text, or text and HTML side by side
+	// (alternative), with pictures for the HTML (related), with files
+	// (mixed). Only the levels that are needed are created.
+	body := leafPart("text/plain", map[string]string{"charset": "utf-8"}, "quoted-printable", []byte(text))
+	if html != "" {
+		body = multiPart("alternative", body, leafPart("text/html", map[string]string{"charset": "utf-8"}, "quoted-printable", []byte(html)))
+		if len(o.Inline) > 0 {
+			related := []*mimePart{body}
+			for _, img := range o.Inline {
+				related = append(related, inlinePart(img))
+			}
+			body = multiPart("related", related...)
+		}
+	}
+	if len(o.Attachments) > 0 {
+		mixed := []*mimePart{body}
+		for _, a := range o.Attachments {
+			mixed = append(mixed, attachmentPart(a))
+		}
+		body = multiPart("mixed", mixed...)
+	}
+
+	top := h.Header.Copy()
+	for _, f := range []string{"Content-Type", "Content-Transfer-Encoding", "Content-Disposition"} {
+		top.Del(f)
+	}
+	body.header.Header = mergeHeaders(top.Header, body.header.Header)
 	var buf bytes.Buffer
-	plainHeader := func() mail.InlineHeader {
-		var ih mail.InlineHeader
-		ih.SetContentType("text/plain", map[string]string{"charset": "utf-8"})
-		ih.Set("Content-Transfer-Encoding", "quoted-printable")
-		return ih
-	}
-	htmlHeader := func() mail.InlineHeader {
-		var ih mail.InlineHeader
-		ih.SetContentType("text/html", map[string]string{"charset": "utf-8"})
-		ih.Set("Content-Transfer-Encoding", "quoted-printable")
-		return ih
-	}
-	writePart := func(create func(mail.InlineHeader) (io.WriteCloser, error), h mail.InlineHeader, body string) error {
-		pw, err := create(h)
-		if err != nil {
-			return err
-		}
-		if _, err = io.WriteString(pw, body); err != nil {
-			return err
-		}
-		return pw.Close()
-	}
-	// writeBody writes the text, and the HTML version next to it.
-	writeBody := func(iw *mail.InlineWriter) error {
-		if err := writePart(iw.CreatePart, plainHeader(), text); err != nil {
-			return err
-		}
-		if err := writePart(iw.CreatePart, htmlHeader(), normalizeNewlines(o.HTML)); err != nil {
-			return err
-		}
-		return iw.Close()
-	}
-
-	if len(o.Attachments) == 0 {
-		if o.HTML != "" {
-			iw, err := mail.CreateInlineWriter(&buf, h)
-			if err != nil {
-				return nil, "", err
-			}
-			if err = writeBody(iw); err != nil {
-				return nil, "", err
-			}
-			return buf.Bytes(), messageID, nil
-		}
-		h.SetContentType("text/plain", map[string]string{"charset": "utf-8"})
-		h.Set("Content-Transfer-Encoding", "quoted-printable")
-		w, err := mail.CreateSingleInlineWriter(&buf, h)
-		if err != nil {
-			return nil, "", err
-		}
-		if _, err = io.WriteString(w, text); err != nil {
-			return nil, "", err
-		}
-		if err = w.Close(); err != nil {
-			return nil, "", err
-		}
-		return buf.Bytes(), messageID, nil
-	}
-
-	w, err := mail.CreateWriter(&buf, h)
-	if err != nil {
-		return nil, "", err
-	}
-	if o.HTML != "" {
-		iw, inlineErr := w.CreateInline()
-		if inlineErr != nil {
-			return nil, "", inlineErr
-		}
-		if err = writeBody(iw); err != nil {
-			return nil, "", err
-		}
-	} else if err = writePart(w.CreateSingleInline, plainHeader(), text); err != nil {
-		return nil, "", err
-	}
-	for _, a := range o.Attachments {
-		var ah mail.AttachmentHeader
-		contentType := a.ContentType
-		if _, _, parseErr := mime.ParseMediaType(contentType); contentType == "" || parseErr != nil {
-			contentType = "application/octet-stream"
-		}
-		ah.SetContentType(contentType, nil)
-		ah.SetFilename(sanitizeFilename(a.Filename))
-		ah.Set("Content-Transfer-Encoding", "base64")
-		aw, err := w.CreateAttachment(ah)
-		if err != nil {
-			return nil, "", err
-		}
-		if _, err = aw.Write(a.Data); err != nil {
-			return nil, "", err
-		}
-		if err = aw.Close(); err != nil {
-			return nil, "", err
-		}
-	}
-	if err = w.Close(); err != nil {
+	if err := body.write(&buf, nil); err != nil {
 		return nil, "", err
 	}
 	return buf.Bytes(), messageID, nil
+}
+
+// mimePart is a node of the message body tree.
+type mimePart struct {
+	header   message.Header
+	body     []byte
+	children []*mimePart
+}
+
+func leafPart(mediaType string, params map[string]string, encoding string, body []byte) *mimePart {
+	p := &mimePart{body: body}
+	p.header.SetContentType(mediaType, params)
+	p.header.Set("Content-Transfer-Encoding", encoding)
+	return p
+}
+
+func multiPart(subtype string, children ...*mimePart) *mimePart {
+	p := &mimePart{children: children}
+	p.header.SetContentType("multipart/"+subtype, nil)
+	return p
+}
+
+func safeContentType(contentType, fallback string) string {
+	if t, _, err := mime.ParseMediaType(contentType); err == nil && t != "" && !strings.HasPrefix(t, "multipart/") {
+		return t
+	}
+	return fallback
+}
+
+func attachmentPart(a OutgoingAttachment) *mimePart {
+	var ah mail.AttachmentHeader
+	ah.SetContentType(safeContentType(a.ContentType, "application/octet-stream"), nil)
+	ah.SetFilename(sanitizeFilename(a.Filename))
+	ah.Set("Content-Transfer-Encoding", "base64")
+	return &mimePart{header: ah.Header, body: a.Data}
+}
+
+func inlinePart(img InlineImage) *mimePart {
+	var ih mail.AttachmentHeader
+	ih.SetContentType(safeContentType(img.ContentType, "image/png"), nil)
+	ih.SetFilename(sanitizeFilename(img.Filename))
+	ih.SetContentDisposition("inline", map[string]string{"filename": sanitizeFilename(img.Filename)})
+	ih.Set("Content-ID", "<"+strings.Trim(img.ContentID, "<>")+">")
+	ih.Set("Content-Transfer-Encoding", "base64")
+	return &mimePart{header: ih.Header, body: img.Data}
+}
+
+func mergeHeaders(top, part textproto.Header) textproto.Header {
+	out := top.Copy()
+	fields := part.Fields()
+	for fields.Next() {
+		out.Add(fields.Key(), fields.Value())
+	}
+	return out
+}
+
+// write renders the part; parent is nil for the message itself.
+func (p *mimePart) write(w io.Writer, parent *message.Writer) error {
+	var mw *message.Writer
+	var err error
+	if parent == nil {
+		mw, err = message.CreateWriter(w, p.header)
+	} else {
+		mw, err = parent.CreatePart(p.header)
+	}
+	if err != nil {
+		return err
+	}
+	if len(p.children) > 0 {
+		for _, c := range p.children {
+			if err = c.write(nil, mw); err != nil {
+				return err
+			}
+		}
+	} else if _, err = mw.Write(p.body); err != nil {
+		return err
+	}
+	return mw.Close()
 }
 
 func normalizeNewlines(s string) string {

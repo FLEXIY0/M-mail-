@@ -126,6 +126,7 @@ export default function SettingsDialog() {
                     onDisplayName={setDisplayName}
                     email={me.email || me.username || ''}
                     botUsername={config.bot_username}
+                    signatureImage={true}
                 />
             </section>
 

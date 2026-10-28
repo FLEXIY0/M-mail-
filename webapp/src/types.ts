@@ -27,6 +27,8 @@ export interface Settings {
     mark_read_on_open: boolean;
     load_images: boolean;
     signature: string;
+    signature_image?: boolean;
+    signature_layout?: 'left' | 'above';
 }
 
 export interface PluginConfig {
@@ -91,6 +93,7 @@ export interface Folder {
     unseen: number;
     total: number;
     no_select?: boolean;
+    delim?: string;
 }
 
 export interface MessageSummary {
@@ -121,6 +124,7 @@ export interface Attachment {
 
 export interface Message extends MessageSummary {
     cc: Address[];
+    bcc?: Address[];
     reply_to: Address[];
     in_reply_to?: string;
     references?: string[];
@@ -170,6 +174,8 @@ export interface SendRequest {
     forward_parts?: string[];
     attachments: OutgoingFile[];
     mattermost_files?: string[];
+    signature_image?: boolean;
+    draft_of?: MessageRef;
 }
 
 export interface CheckResult {

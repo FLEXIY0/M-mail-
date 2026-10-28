@@ -45,7 +45,9 @@ type Attachment struct {
 // Message is a message prepared for reading.
 type Message struct {
 	Summary
-	Cc         []Address    `json:"cc"`
+	Cc []Address `json:"cc"`
+	// Bcc is known only for own messages: drafts and some "Sent" copies.
+	Bcc        []Address    `json:"bcc,omitempty"`
 	ReplyTo    []Address    `json:"reply_to"`
 	InReplyTo  string       `json:"in_reply_to,omitempty"`
 	References []string     `json:"references,omitempty"`
@@ -354,6 +356,7 @@ func (m *IMAP) Get(ctx context.Context, folder string, uid uint32, markSeen bool
 	}
 	if env := buf.Envelope; env != nil {
 		msg.Cc = convertAddresses(env.Cc)
+		msg.Bcc = convertAddresses(env.Bcc)
 		msg.ReplyTo = convertAddresses(env.ReplyTo)
 		if len(env.InReplyTo) > 0 {
 			msg.InReplyTo = env.InReplyTo[0]

@@ -292,7 +292,16 @@ func (p *Plugin) handleMove(w http.ResponseWriter, r *http.Request) {
 		to := req.To
 		if to == "" {
 			var err error
-			if to, err = conn.FolderByRole(ctx, req.Role); err != nil {
+			switch req.Role {
+			case mailclient.RoleJunk:
+				// "Это спам" works on a server without a Spam folder too.
+				to, err = conn.EnsureFolder(ctx, mailclient.RoleJunk, "Спам")
+			case mailclient.RoleArchive:
+				to, err = conn.EnsureFolder(ctx, mailclient.RoleArchive, "Архив")
+			default:
+				to, err = conn.FolderByRole(ctx, req.Role)
+			}
+			if err != nil {
 				return err
 			}
 			if to == "" {
@@ -357,7 +366,15 @@ type sendRequest struct {
 	ForwardParts []string `json:"forward_parts"`
 	// MattermostFiles are ids of files from Mattermost posts to attach.
 	MattermostFiles []string `json:"mattermost_files"`
+	// SignatureImage attaches the stored signature picture; the HTML
+	// refers to it as cid:signature@mattermost.
+	SignatureImage bool `json:"signature_image"`
+	// DraftOf is the saved draft this message replaces: it is removed
+	// after the message is sent or saved again.
+	DraftOf *messageRef `json:"draft_of,omitempty"`
 }
+
+const signatureContentID = "signature@mattermost"
 
 func (p *Plugin) cleanAddresses(list []recipient) ([]mailclient.Address, error) {
 	out := make([]mailclient.Address, 0, len(list))
@@ -388,41 +405,44 @@ func (p *Plugin) cleanAddresses(list []recipient) ([]mailclient.Address, error) 
 	return out, nil
 }
 
-// POST /send — send a new message, a reply or a forward.
-func (p *Plugin) handleSend(w http.ResponseWriter, r *http.Request) {
-	userID := userIDFrom(r)
-	cfg := p.getConfiguration()
+func decodeSendRequest(w http.ResponseWriter, r *http.Request, cfg *configuration) (*sendRequest, bool) {
 	limit := cfg.maxAttachmentBytes()*4/3 + maxTextBytes + maxHTMLBytes + maxBodyBytes
 	var req sendRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, limit)).Decode(&req); err != nil {
 		writeError(w, http.StatusRequestEntityTooLarge, codeAttachmentsLarge, err.Error())
-		return
+		return nil, false
 	}
-	account := p.accountFor(w, userID)
-	if account == nil {
-		return
-	}
-	if !p.sendLimiter.allow(userID) {
-		writeError(w, http.StatusTooManyRequests, codeRateLimited, "")
-		return
-	}
+	return &req, true
+}
 
-	out, err := p.buildOutgoing(account, &req)
+// prepareOutgoing turns the request into a message: addresses, files from
+// Mattermost and from the original, threading headers and the signature
+// picture. It writes the error response itself and returns nil then.
+func (p *Plugin) prepareOutgoing(ctx context.Context, w http.ResponseWriter, userID string, account *store.Account, req *sendRequest, draft bool) *mailclient.Outgoing {
+	cfg := p.getConfiguration()
+	out, err := p.buildOutgoing(account, req, draft)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidMessage, err.Error())
-		return
+		return nil
 	}
+	out.KeepBcc = draft
 	if err = p.attachMattermostFiles(userID, out, req.MattermostFiles); err != nil {
 		writeError(w, http.StatusBadRequest, codeInvalidMessage, err.Error())
-		return
+		return nil
 	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), 2*requestTimeout)
-	defer cancel()
+	if req.SignatureImage && out.HTML != "" {
+		if img, imgErr := p.store.GetSignatureImage(userID); imgErr == nil && img != nil {
+			ext := ".png"
+			if exts, _ := mime.ExtensionsByType(img.ContentType); len(exts) > 0 {
+				ext = exts[0]
+			}
+			out.Inline = append(out.Inline, mailclient.InlineImage{ContentID: signatureContentID, ContentType: img.ContentType, Filename: "signature" + ext, Data: img.Data})
+		}
+	}
 
 	// Threading headers and forwarded files come from the server, not
 	// from the browser.
-	if req.ReplyTo != nil || req.Forward != nil {
+	if req.ReplyTo != nil || req.Forward != nil || req.DraftOf != nil {
 		err = p.withIMAP(ctx, userID, account, true, func(conn *mailclient.IMAP) error {
 			if ref := req.ReplyTo; ref != nil {
 				original, getErr := conn.Get(ctx, ref.Folder, ref.UID, false)
@@ -432,6 +452,13 @@ func (p *Plugin) handleSend(w http.ResponseWriter, r *http.Request) {
 				if original.MessageID != "" {
 					out.InReplyTo = original.MessageID
 					out.References = append(append([]string{}, original.References...), original.MessageID)
+				}
+			}
+			if ref := req.DraftOf; ref != nil && req.ReplyTo == nil {
+				// A reply saved as a draft keeps its place in the thread.
+				if saved, getErr := conn.Get(ctx, ref.Folder, ref.UID, false); getErr == nil && saved.InReplyTo != "" {
+					out.InReplyTo = saved.InReplyTo
+					out.References = saved.References
 				}
 			}
 			if ref := req.Forward; ref != nil && len(req.ForwardParts) > 0 {
@@ -447,7 +474,7 @@ func (p *Plugin) handleSend(w http.ResponseWriter, r *http.Request) {
 		})
 		if err != nil {
 			writeMailError(w, err)
-			return
+			return nil
 		}
 	}
 	var total int64
@@ -456,6 +483,30 @@ func (p *Plugin) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	if total > cfg.maxAttachmentBytes() {
 		writeError(w, http.StatusRequestEntityTooLarge, codeAttachmentsLarge, fmt.Sprintf("%d MB max", cfg.maxAttachmentBytes()>>20))
+		return nil
+	}
+	return out
+}
+
+// POST /send — send a new message, a reply or a forward.
+func (p *Plugin) handleSend(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFrom(r)
+	req, ok := decodeSendRequest(w, r, p.getConfiguration())
+	if !ok {
+		return
+	}
+	account := p.accountFor(w, userID)
+	if account == nil {
+		return
+	}
+	if !p.sendLimiter.allow(userID) {
+		writeError(w, http.StatusTooManyRequests, codeRateLimited, "")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*requestTimeout)
+	defer cancel()
+	out := p.prepareOutgoing(ctx, w, userID, account, req, false)
+	if out == nil {
 		return
 	}
 
@@ -478,11 +529,59 @@ func (p *Plugin) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	p.API.LogInfo("Mail sent", "user_id", userID, "recipients", len(out.Recipients()), "bytes", len(raw))
 
-	go p.afterSend(userID, account, req.ReplyTo, messageID, raw)
+	go p.afterSend(userID, account, req.ReplyTo, req.DraftOf, messageID, raw)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message_id": messageID})
 }
 
-func (p *Plugin) buildOutgoing(account *store.Account, req *sendRequest) (*mailclient.Outgoing, error) {
+// POST /drafts — save the message to "Drafts" on the mail server, so that it
+// can be finished later here or in any other mail app.
+func (p *Plugin) handleSaveDraft(w http.ResponseWriter, r *http.Request) {
+	userID := userIDFrom(r)
+	req, ok := decodeSendRequest(w, r, p.getConfiguration())
+	if !ok {
+		return
+	}
+	account := p.accountFor(w, userID)
+	if account == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*requestTimeout)
+	defer cancel()
+	out := p.prepareOutgoing(ctx, w, userID, account, req, true)
+	if out == nil {
+		return
+	}
+	raw, _, err := out.Build()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, codeInternal, err.Error())
+		return
+	}
+	var folder string
+	var uid uint32
+	err = p.withIMAP(ctx, userID, account, true, func(conn *mailclient.IMAP) error {
+		var err error
+		if folder, err = conn.EnsureFolder(ctx, mailclient.RoleDrafts, "Черновики"); err != nil {
+			return err
+		}
+		if uid, err = conn.AppendDraft(ctx, folder, raw); err != nil {
+			return err
+		}
+		if ref := req.DraftOf; ref != nil {
+			if delErr := conn.DeleteForever(ctx, ref.Folder, []uint32{ref.UID}); delErr != nil {
+				p.API.LogDebug("Failed to remove the previous draft", "err", delErr.Error())
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		writeMailError(w, err)
+		return
+	}
+	p.publish(userID, wsMailUpdated, nil)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "folder": folder, "uid": uid})
+}
+
+func (p *Plugin) buildOutgoing(account *store.Account, req *sendRequest, draft bool) (*mailclient.Outgoing, error) {
 	to, err := p.cleanAddresses(req.To)
 	if err != nil {
 		return nil, err
@@ -504,7 +603,7 @@ func (p *Plugin) buildOutgoing(account *store.Account, req *sendRequest) (*mailc
 		Text:    req.Text,
 		HTML:    req.HTML,
 	}
-	if n := len(out.Recipients()); n == 0 {
+	if n := len(out.Recipients()); n == 0 && !draft {
 		return nil, fmt.Errorf("укажите хотя бы одного получателя")
 	} else if n > maxRecipients {
 		return nil, fmt.Errorf("не больше %d получателей в одном письме", maxRecipients)
@@ -562,7 +661,7 @@ func (p *Plugin) attachMattermostFiles(userID string, out *mailclient.Outgoing, 
 // sent message is in "Sent". Mail.ru and Yandex save it themselves, most
 // other servers do not, so the plugin looks first and appends only when
 // the copy is missing.
-func (p *Plugin) afterSend(userID string, account *store.Account, replyTo *messageRef, messageID string, raw []byte) {
+func (p *Plugin) afterSend(userID string, account *store.Account, replyTo, draftOf *messageRef, messageID string, raw []byte) {
 	time.Sleep(sentCopyDelay)
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
 	defer cancel()
@@ -570,6 +669,11 @@ func (p *Plugin) afterSend(userID string, account *store.Account, replyTo *messa
 		if replyTo != nil {
 			if err := conn.SetFlags(ctx, replyTo.Folder, []uint32{replyTo.UID}, "answered", true); err != nil {
 				p.API.LogDebug("Failed to mark the message as answered", "err", err.Error())
+			}
+		}
+		if draftOf != nil {
+			if err := conn.DeleteForever(ctx, draftOf.Folder, []uint32{draftOf.UID}); err != nil {
+				p.API.LogDebug("Failed to remove the sent draft", "err", err.Error())
 			}
 		}
 		sent, err := conn.FolderByRole(ctx, mailclient.RoleSent)

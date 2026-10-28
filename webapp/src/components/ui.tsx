@@ -195,7 +195,7 @@ export function PanelPage({title, onClose, children, footer, closeLabel = 'На�
     footer?: React.ReactNode;
     width?: number;
     closeLabel?: string;
-    icon?: 'back' | 'close';
+    icon?: 'back' | 'close' | 'spinner';
     actions?: React.ReactNode;
     className?: string;
 }) {
@@ -219,7 +219,9 @@ export function PanelPage({title, onClose, children, footer, closeLabel = 'На�
                     aria-label={closeLabel}
                     title={closeLabel}
                 >
-                    {icon === 'close' ? <CloseIcon size={20}/> : <ArrowLeftIcon size={20}/>}
+                    {icon === 'spinner' && <Spinner size={18}/>}
+                    {icon === 'close' && <CloseIcon size={20}/>}
+                    {icon === 'back' && <ArrowLeftIcon size={20}/>}
                 </button>
                 <div className='mml-page__title'>{title}</div>
                 {actions && <div className='mml-page__actions'>{actions}</div>}

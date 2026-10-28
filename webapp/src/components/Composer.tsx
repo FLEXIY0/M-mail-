@@ -1,6 +1,6 @@
 import React from 'react';
 
-import {CloseIcon, PaperclipIcon, SendIcon, Spinner} from './icons';
+import {CloseIcon, PaperclipIcon, SendIcon, Spinner, TrashIcon} from './icons';
 import {HtmlFrame} from './MessageView';
 import RecipientPicker, {participantFromEmail} from './RecipientPicker';
 import type {Participant} from './RecipientPicker';
@@ -9,7 +9,9 @@ import {Callout, PanelPage} from './ui';
 
 import {ApiError, api} from '../api';
 import {addressFull, formatQuoteDate, formatSize, quoteText, subjectWith} from '../format';
-import {closeCompose, mailChanged, useStore} from '../state';
+import {SIGNATURE_CID, fitSize, isPortrait, signatureHTML, useSignatureImage} from '../signature';
+import type {SignatureImageInfo} from '../signature';
+import {closeCompose, hideToast, mailChanged, openCompose, showToast, useStore} from '../state';
 import type {ComposeRequest} from '../state';
 import type {Address, Attachment, Me, Message, OutgoingFile, Recipient, SendRequest} from '../types';
 
@@ -42,10 +44,58 @@ interface Draft {
     forwardParts: string[];
     mmFiles: Array<{id: string; name: string; size: number}>;
     initialText: string;
+
+    // The signature is a separate block under the text, so that it can
+    // carry a picture and be removed with one click.
+    signature: boolean;
+
+    // Recipients or the subject were changed by the user.
+    edited: boolean;
 }
 
 // Drafts survive closing the panel: the composer remounts with them.
 const drafts = new Map<string, Draft>();
+
+// Errors of a send that failed after the composer was closed.
+const sendErrors = new Map<string, ApiError>();
+
+// "Undo send": the message waits a few seconds before it goes out.
+const UNDO_SECONDS = 5;
+
+function scheduleSend(request: ComposeRequest, req: SendRequest) {
+    const id = request.id || 'default';
+    let cancelled = false;
+    const timer = window.setTimeout(async () => {
+        if (cancelled) {
+            return;
+        }
+        hideToast(toastId);
+        try {
+            await api.send(req);
+            drafts.delete(id);
+            showToast('Письмо отправлено');
+            mailChanged();
+        } catch (e) {
+            // The draft is still there: open it again with the error.
+            sendErrors.set(id, e as ApiError);
+            openCompose(request);
+            showToast('Письмо не отправлено', {kind: 'error'});
+        }
+    }, UNDO_SECONDS * 1000);
+    const toastId = showToast('Отправка письма…', {
+        ms: (UNDO_SECONDS * 1000) + 500,
+        countdown: UNDO_SECONDS * 1000,
+        action: {
+            label: 'Отменить',
+            run: () => {
+                cancelled = true;
+                window.clearTimeout(timer);
+                hideToast(toastId);
+                openCompose(request);
+            },
+        },
+    });
+}
 
 function toParticipants(list: Address[], exclude: Set<string>): Participant[] {
     const out: Participant[] = [];
@@ -109,11 +159,6 @@ export function quoteHTMLOf(html: string): string {
     return styles + wrapper.outerHTML;
 }
 
-function withSignature(body: string, signature: string) {
-    const sig = signature.trim();
-    return sig ? `${body}\n\n${sig}` : body;
-}
-
 function quotedText(q: Quote, forward: boolean) {
     return forward ? `${q.header}\n\n${q.text}` : `${q.header}\n${quoteText(q.text)}`;
 }
@@ -121,8 +166,8 @@ function quotedText(q: Quote, forward: boolean) {
 // buildDraft prepares the fields of a new message, a reply or a forward.
 function buildDraft(req: ComposeRequest, original: Message | null, me: Me): Draft {
     const own = new Set([(me.email || '').toLowerCase(), (me.username || '').toLowerCase()]);
-    const signature = me.settings?.signature || '';
-    const draft: Draft = {to: [], cc: [], bcc: [], showCc: false, subject: req.subject || '', text: '', files: [], quote: null, forwardParts: [], mmFiles: req.mattermostFiles || [], initialText: ''};
+    const hasSignature = Boolean((me.settings?.signature || '').trim() || me.settings?.signature_image);
+    const draft: Draft = {to: [], cc: [], bcc: [], showCc: false, subject: req.subject || '', text: req.text || '', files: [], quote: null, forwardParts: [], mmFiles: req.mattermostFiles || [], initialText: '', signature: hasSignature, edited: false};
 
     if (req.to) {
         draft.to = req.to.filter((r) => r.email).map((r) => participantFromEmail(r.email || '', r.name));
@@ -141,7 +186,6 @@ function buildDraft(req: ComposeRequest, original: Message | null, me: Me): Draf
         draft.subject = subjectWith('Re', original.subject);
         const author = original.from[0] ? addressFull(original.from[0]) : '';
         draft.quote = {header: `${formatQuoteDate(original.date)} от ${author}:`, text: original.text || '', html: original.html};
-        draft.text = withSignature('', signature);
     } else if (original && req.mode === 'forward') {
         draft.subject = subjectWith('Fwd', original.subject);
         const head = [
@@ -155,10 +199,27 @@ function buildDraft(req: ComposeRequest, original: Message | null, me: Me): Draf
             head.push(`Копия: ${original.cc.map(addressFull).join(', ')}`);
         }
         draft.quote = {header: head.join('\n'), text: original.text || '', html: original.html};
-        draft.text = withSignature('', signature);
         draft.forwardParts = (original.attachments || []).filter((a) => !a.inline).map((a) => a.part);
-    } else {
-        draft.text = withSignature(req.text || '', signature);
+    } else if (original && req.mode === 'draft') {
+        // A saved draft already has its signature and quote in the text.
+        draft.to = toParticipants(original.to, new Set());
+        draft.cc = toParticipants(original.cc, new Set());
+        draft.bcc = toParticipants(original.bcc || [], new Set());
+        draft.showCc = draft.cc.length + draft.bcc.length > 0;
+        draft.subject = original.subject;
+        draft.forwardParts = (original.attachments || []).filter((a) => !a.inline && a.content_id !== SIGNATURE_CID).map((a) => a.part);
+
+        // The signature at the end goes back into its own block, with the
+        // picture; a quote below it stays in the text.
+        const text = (original.text || '').replace(/\r\n/g, '\n').replace(/\s+$/, '');
+        const sig = (me.settings?.signature || '').trim();
+        const at = sig ? text.lastIndexOf(`\n\n${sig}`) : -1;
+        if (at >= 0 && text.slice(at + sig.length + 2).trim() === '') {
+            draft.text = text.slice(0, at);
+        } else {
+            draft.text = text;
+            draft.signature = false;
+        }
     }
     draft.initialText = draft.text;
     return draft;
@@ -202,7 +263,9 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
     const [loadError, setLoadError] = React.useState<ApiError | null>(null);
     const [draft, setDraftState] = React.useState<Draft | null>(() => drafts.get(id) || (needsOriginal ? null : buildDraft(request, null, me)));
     const [sending, setSending] = React.useState(false);
-    const [error, setError] = React.useState<ApiError | null>(null);
+    const [saving, setSaving] = React.useState(false);
+    const [error, setError] = React.useState<ApiError | null>(() => sendErrors.get(id) || null);
+    const sigImage = useSignatureImage(me.settings);
     const [dragOver, setDragOver] = React.useState(false);
     const fileInput = React.useRef<HTMLInputElement>(null);
     const textRef = React.useRef<HTMLTextAreaElement>(null);
@@ -255,7 +318,7 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
     if (!draft) {
         return (
             <PanelPage
-                title={request.mode === 'forward' ? 'Пересылка' : 'Ответ'}
+                title={{forward: 'Пересылка', draft: 'Черновик'}[request.mode as string] || 'Ответ'}
                 onClose={closeCompose}
                 icon='close'
             >
@@ -270,22 +333,60 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
     }
 
     const forward = request.mode === 'forward';
-    const forwarded: Attachment[] = original && forward ? (original.attachments || []).filter((a) => !a.inline) : [];
+    const forwarded: Attachment[] = original && (forward || request.mode === 'draft') ? (original.attachments || []).filter((a) => !a.inline) : [];
     const forwardSet = new Set(draft.forwardParts);
     const totalBytes = draft.files.reduce((n, f) => n + f.size, 0) +
         forwarded.filter((a) => forwardSet.has(a.part)).reduce((n, a) => n + a.size, 0) +
         draft.mmFiles.reduce((n, f) => n + f.size, 0);
     const tooLarge = totalBytes > maxBytes;
-    const dirty = draft.text !== draft.initialText || draft.files.length > 0 || (request.mode === 'new' && (draft.to.length > 0 || draft.subject !== (request.subject || '')));
+    const dirty = draft.text !== draft.initialText || draft.files.length > 0 || draft.edited;
     const reading = draft.files.some((f) => !f.data);
+    const signatureText = (me.settings?.signature || '').trim();
+    const layout = me.settings?.signature_layout || 'left';
+    const withSignature = draft.signature && Boolean(signatureText || sigImage);
 
-    const close = () => {
-        // eslint-disable-next-line no-alert
-        if (dirty && !sending && !window.confirm('Удалить черновик? Текст письма не сохранится.')) {
+    const forget = () => {
+        drafts.delete(id);
+        sendErrors.delete(id);
+        closeCompose();
+    };
+
+    // Closing keeps the message in "Черновики", like mail apps do.
+    const close = async () => {
+        if (!dirty || sending || saving) {
+            if (!saving) {
+                forget();
+            }
             return;
         }
-        drafts.delete(id);
-        closeCompose();
+        setSaving(true);
+        setError(null);
+        try {
+            await api.saveDraft(buildRequest());
+            forget();
+            showToast('Черновик сохранён');
+            mailChanged();
+        } catch (e) {
+            setError(e as ApiError);
+            setSaving(false);
+        }
+    };
+
+    const discard = async () => {
+        // eslint-disable-next-line no-alert
+        if (dirty && !window.confirm('Удалить черновик?')) {
+            return;
+        }
+        if (request.mode === 'draft' && request.source) {
+            try {
+                await api.remove(request.source.folder, [request.source.uid]);
+                mailChanged();
+            } catch (e) {
+                setError(e as ApiError);
+                return;
+            }
+        }
+        forget();
     };
 
     const addFiles = async (list: FileList | null) => {
@@ -307,31 +408,31 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
 
     // The text goes as is, plus the quote: as "> " lines in the text
     // version and with its formatting in the HTML version.
+    // The HTML version is needed for a quote with formatting or a picture
+    // in the signature; otherwise the message stays plain text.
     const buildBody = () => {
         const q = draft.quote;
-        if (!q) {
-            return {text: draft.text, html: ''};
-        }
         const own = draft.text.replace(/\s+$/, '');
-        const text = `${own}\n\n${quotedText(q, forward)}`;
-        const quoteHTML = q.html ? quoteHTMLOf(q.html) : textToHTML(q.text);
-        const html = `<div>${textToHTML(own)}</div><br>` +
-            `<div>${textToHTML(q.header)}</div>` +
-            (forward ? `<div>${quoteHTML}</div>` : `<blockquote style="margin:0 0 0 .8ex;border-left:2px solid #0077ff;padding-left:1ex">${quoteHTML}</blockquote>`);
-        return {text, html};
+        const sigText = withSignature && signatureText ? `\n\n${signatureText}` : '';
+        const sigImg = withSignature && sigImage ? sigImage : null;
+        const text = own + sigText + (q ? `\n\n${quotedText(q, forward)}` : '');
+        if (!q && !sigImg) {
+            return {text, html: '', image: false};
+        }
+        let html = `<div>${textToHTML(own)}</div>`;
+        if (withSignature) {
+            html += signatureHTML(signatureText, layout, sigImg);
+        }
+        if (q) {
+            const quoteHTML = q.html ? quoteHTMLOf(q.html) : textToHTML(q.text);
+            html += '<br>' +
+                `<div>${textToHTML(q.header)}</div>` +
+                (forward ? `<div>${quoteHTML}</div>` : `<blockquote style="margin:0 0 0 .8ex;border-left:2px solid #0077ff;padding-left:1ex">${quoteHTML}</blockquote>`);
+        }
+        return {text, html, image: Boolean(sigImg)};
     };
 
-    const send = async () => {
-        if (draft.to.length + draft.cc.length + draft.bcc.length === 0) {
-            setError(new ApiError('invalid_message', 'Укажите хотя бы одного получателя.', 'Укажите хотя бы одного получателя.', 400));
-            return;
-        }
-        // eslint-disable-next-line no-alert
-        if (!draft.subject.trim() && !window.confirm('Отправить письмо без темы?')) {
-            return;
-        }
-        setSending(true);
-        setError(null);
+    const buildRequest = (): SendRequest => {
         const attachments: OutgoingFile[] = draft.files.filter((f) => f.data).map((f) => ({filename: f.name, content_type: f.type || 'application/octet-stream', data: f.data || ''}));
         const body = buildBody();
         const req: SendRequest = {
@@ -341,25 +442,36 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
             subject: draft.subject.trim(),
             text: body.text,
             html: body.html || undefined,
+            signature_image: body.image || undefined,
             attachments,
             mattermost_files: draft.mmFiles.map((f) => f.id),
         };
         if (request.source && (request.mode === 'reply' || request.mode === 'reply_all')) {
             req.reply_to = request.source;
         }
-        if (request.source && forward) {
+        if (request.source && (forward || request.mode === 'draft')) {
             req.forward = request.source;
             req.forward_parts = draft.forwardParts;
         }
-        try {
-            await api.send(req);
-            drafts.delete(id);
-            closeCompose();
-            mailChanged();
-        } catch (e) {
-            setError(e as ApiError);
-            setSending(false);
+        if (request.source && request.mode === 'draft') {
+            req.draft_of = request.source;
         }
+        return req;
+    };
+
+    const send = () => {
+        if (draft.to.length + draft.cc.length + draft.bcc.length === 0) {
+            setError(new ApiError('invalid_message', 'Укажите хотя бы одного получателя.', 'Укажите хотя бы одного получателя.', 400));
+            return;
+        }
+        // eslint-disable-next-line no-alert
+        if (!draft.subject.trim() && !window.confirm('Отправить письмо без темы?')) {
+            return;
+        }
+        setSending(true);
+        sendErrors.delete(id);
+        scheduleSend(request, buildRequest());
+        closeCompose();
     };
 
     const sendButton = (
@@ -368,20 +480,35 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
             className='mml-icon-btn mml-icon-btn--lg mml-icon-btn--accent-plain mml-composer__send'
             title='Отправить (Ctrl+Enter)'
             aria-label='Отправить'
-            disabled={sending || reading || tooLarge}
+            disabled={sending || saving || reading || tooLarge}
             onClick={send}
         >
             {sending ? <Spinner size={18}/> : <SendIcon size={22}/>}
         </button>
+    );
+    const headerActions = (
+        <>
+            <button
+                type='button'
+                className='mml-icon-btn mml-icon-btn--lg'
+                title='Удалить черновик'
+                aria-label='Удалить черновик'
+                disabled={sending || saving}
+                onClick={discard}
+            >
+                <TrashIcon size={18}/>
+            </button>
+            {sendButton}
+        </>
     );
 
     return (
         <PanelPage
             title={<span className='mml-ellipsis'>{me.email}</span>}
             onClose={close}
-            closeLabel='Закрыть письмо'
-            icon='close'
-            actions={sendButton}
+            closeLabel={dirty ? 'Сохранить черновик и закрыть' : 'Закрыть письмо'}
+            icon={saving ? 'spinner' : 'close'}
+            actions={headerActions}
             className='mml-page--composer'
         >
             <div
@@ -411,7 +538,7 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                     <span className='mml-composer__label'>{'Кому:'}</span>
                     <RecipientPicker
                         value={draft.to}
-                        onChange={(to) => update({to})}
+                        onChange={(to) => update({to, edited: true})}
                         disabled={sending}
                         autoFocus={request.mode === 'new' || forward}
                         placeholder=''
@@ -423,7 +550,7 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                             <span className='mml-composer__label'>{'Копия:'}</span>
                             <RecipientPicker
                                 value={draft.cc}
-                                onChange={(cc) => update({cc})}
+                                onChange={(cc) => update({cc, edited: true})}
                                 disabled={sending}
                                 placeholder=''
                             />
@@ -437,7 +564,7 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                             </span>
                             <RecipientPicker
                                 value={draft.bcc}
-                                onChange={(bcc) => update({bcc})}
+                                onChange={(bcc) => update({bcc, edited: true})}
                                 disabled={sending}
                                 placeholder=''
                             />
@@ -460,7 +587,7 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                         maxLength={500}
                         disabled={sending}
                         aria-label='Тема'
-                        onChange={(e) => update({subject: e.target.value})}
+                        onChange={(e) => update({subject: e.target.value, edited: true})}
                     />
                     <button
                         type='button'
@@ -559,6 +686,15 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                     onChange={(e) => update({text: e.target.value})}
                 />
 
+                {withSignature && (
+                    <SignatureBlock
+                        text={signatureText}
+                        image={sigImage}
+                        layout={layout}
+                        onRemove={() => update({signature: false})}
+                    />
+                )}
+
                 {draft.quote && (
                     <div className='mml-quote'>
                         <div className='mml-quote__actions'>
@@ -604,5 +740,32 @@ function Composer({request, me, maxBytes}: {request: ComposeRequest; me: Me; max
                 )}
             </div>
         </PanelPage>
+    );
+}
+
+function SignatureBlock({text, image, layout, onRemove}: {text: string; image: SignatureImageInfo | null; layout: 'left' | 'above'; onRemove: () => void}) {
+    const size = image && fitSize(image, layout);
+    return (
+        <div className='mml-composer__signature'>
+            <div className={`mml-sig-preview mml-sig-preview--${layout}`}>
+                {image && size && (
+                    <img
+                        src={image.url}
+                        alt=''
+                        style={{width: size.width, height: size.height, borderRadius: isPortrait(image, layout) ? '50%' : 6}}
+                    />
+                )}
+                {text && <span className='mml-sig-preview__text'>{text}</span>}
+            </div>
+            <button
+                type='button'
+                className='mml-icon-btn'
+                title='Убрать подпись из этого письма'
+                aria-label='Убрать подпись'
+                onClick={onRemove}
+            >
+                <CloseIcon size={14}/>
+            </button>
+        </div>
     );
 }

@@ -457,3 +457,33 @@ export const CircleIcon = ({filled, ...p}: IconProps & {filled?: boolean}) => (
         />
     </svg>
 );
+
+export const PenIcon = (p: IconProps) => (
+    <Svg {...p}>
+        <path d='M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4z'/>
+    </Svg>
+);
+
+export const FolderPlusIcon = (p: IconProps) => (
+    <Svg {...p}>
+        <path d='M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z'/>
+        <path d='M12 11v6M9 14h6'/>
+    </Svg>
+);
+
+export const CheckAllIcon = (p: IconProps) => (
+    <Svg {...p}>
+        <path d='M2 12.5l4.5 4.5L15 8.5M10.5 16l1 1L22 6.5'/>
+    </Svg>
+);
+
+export const UserIcon = (p: IconProps) => (
+    <Svg {...p}>
+        <circle
+            cx='12'
+            cy='8'
+            r='4'
+        />
+        <path d='M4 21a8 8 0 0 1 16 0'/>
+    </Svg>
+);
