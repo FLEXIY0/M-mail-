@@ -6,7 +6,7 @@ const manifest = JSON.parse(`
     "name": "Почта (VK WorkSpace, Mail.ru, Яндекс, IMAP)",
     "description": "Почта на правой панели Mattermost: входящие, чтение, ответ и пересылка, новые письма с уведомлениями от бота. Подключается через мастер по шагам по IMAP/SMTP.",
     "icon_path": "assets/icon.svg",
-    "version": "0.0.0+e9db295",
+    "version": "0.0.0+1546c31",
     "min_server_version": "9.0.0",
     "server": {
         "executables": {
