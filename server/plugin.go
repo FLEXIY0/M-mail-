@@ -32,9 +32,7 @@ type Plugin struct {
 	router *mux.Router
 	botID  string
 
-	checkJob  *cluster.Job
-	updateJob *cluster.Job
-	updater   *updater
+	checkJob *cluster.Job
 
 	sessions  *sessionPool
 	directory *userDirectory
@@ -75,7 +73,6 @@ func (p *Plugin) OnActivate() error {
 	p.directory = newUserDirectory()
 	p.contacts = newContactBook()
 	p.avatars = newAvatarCache()
-	p.updater = newUpdater()
 
 	if err := p.ensureEncryptionKey(); err != nil {
 		return err
@@ -99,16 +96,12 @@ func (p *Plugin) OnActivate() error {
 	if err != nil {
 		return errors.Wrap(err, "failed to schedule the mail check")
 	}
-	p.updateJob, err = cluster.Schedule(p.API, "MailUpdateCheck", cluster.MakeWaitForInterval(12*time.Hour), p.runUpdateCheck)
-	if err != nil {
-		return errors.Wrap(err, "failed to schedule the update check")
-	}
 	return nil
 }
 
 // OnDeactivate is invoked when the plugin is deactivated.
 func (p *Plugin) OnDeactivate() error {
-	for _, job := range []*cluster.Job{p.checkJob, p.updateJob} {
+	for _, job := range []*cluster.Job{p.checkJob} {
 		if job == nil {
 			continue
 		}

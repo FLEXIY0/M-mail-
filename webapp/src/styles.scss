@@ -1141,59 +1141,6 @@ $warning-rgb: var(--away-indicator-rgb, 255, 188, 31);
     &:hover:not(:disabled) { background: accent(0.12); color: $accent; }
 }
 
-// System Console: updates --------------------------------------------------------
-
-.mml-update {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-width: 640px;
-    color: $fg;
-
-    &__row { display: flex; align-items: center; gap: 12px; }
-
-    &__card {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        padding: 16px;
-        border-radius: 8px;
-        box-shadow: inset 0 0 0 1px accent(0.4);
-        background: accent(0.04);
-    }
-
-    &__title { font-size: 15px; font-weight: 600; }
-
-    &__notes {
-        max-height: 240px;
-        overflow-y: auto;
-        font-size: 13px;
-        line-height: 19px;
-
-        ul { margin: 0 0 8px; padding-left: 20px; }
-        p { margin: 0 0 8px; }
-    }
-
-    &__heading { margin: 4px 0; font-weight: 600; }
-
-    &__steps {
-        margin: 0;
-        padding-left: 20px;
-        font-size: 13px;
-        line-height: 20px;
-
-        li { margin-bottom: 4px; }
-    }
-
-    &__ok {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        color: rgb($success-rgb);
-        font-weight: 600;
-    }
-}
-
 // Answer to an invitation ------------------------------------------------------
 
 .mml-error-text { width: 100%; color: rgb($error-rgb); }

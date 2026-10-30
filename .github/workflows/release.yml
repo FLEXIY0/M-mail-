@@ -2,7 +2,7 @@ name: release
 
 # Publishes a release when a version tag is pushed:
 #   git tag v0.1.0 && git push origin v0.1.0
-# The plugin checks these releases and tells administrators about updates.
+# Administrators update the plugin by uploading the bundle from a release.
 on:
   push:
     tags: ['v*']

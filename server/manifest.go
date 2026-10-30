@@ -16,10 +16,8 @@ const manifestStr = `
   "id": "com.github.flexiy0.mail",
   "name": "Почта (VK WorkSpace, Mail.ru, Яндекс, IMAP)",
   "description": "Почта на правой панели Mattermost: входящие, чтение, ответ и пересылка, новые письма с уведомлениями от бота. Подключается через мастер по шагам по IMAP/SMTP.",
-  "homepage_url": "https://github.com/FLEXIY0/M-mail-",
-  "support_url": "https://github.com/FLEXIY0/M-mail-/issues",
   "icon_path": "assets/icon.svg",
-  "version": "0.0.0+72f704c",
+  "version": "0.0.0+5fb2b50",
   "min_server_version": "9.0.0",
   "server": {
     "executables": {
@@ -293,36 +291,6 @@ const manifestStr = `
         "help_text": "Создаётся автоматически и шифрует пароли приложений. Если сгенерировать новый ключ, пользователям придётся переподключить почту.",
         "placeholder": "",
         "default": null,
-        "hosting": "",
-        "secret": false
-      },
-      {
-        "key": "UpdatePanel",
-        "display_name": "Обновления",
-        "type": "custom",
-        "help_text": "",
-        "placeholder": "",
-        "default": null,
-        "hosting": "",
-        "secret": false
-      },
-      {
-        "key": "UpdateSource",
-        "display_name": "Источник обновлений",
-        "type": "text",
-        "help_text": "Репозиторий GitHub в виде «владелец/репозиторий», в релизах которого плагин проверяет новые версии. Можно указать и адрес API своего Gitea: https://git.example.com/api/v1/repos/владелец/репозиторий/releases/latest",
-        "placeholder": "",
-        "default": "FLEXIY0/M-mail-",
-        "hosting": "",
-        "secret": false
-      },
-      {
-        "key": "NotifyAdminsAboutUpdates",
-        "display_name": "Сообщать администраторам о новых версиях",
-        "type": "bool",
-        "help_text": "Бот один раз напишет системным администраторам, когда на GitHub выйдет новая версия.",
-        "placeholder": "",
-        "default": true,
         "hosting": "",
         "secret": false
       }

@@ -213,21 +213,6 @@ export interface MattermostUser {
     email?: string;
 }
 
-export interface UpdateInfo {
-    current: string;
-    latest?: string;
-    name?: string;
-    notes?: string;
-    url?: string;
-    published_at?: string;
-    asset?: string;
-    asset_url?: string;
-    update_available: boolean;
-    uploads_enabled: boolean;
-    source: string;
-    check_error?: string;
-}
-
 // SortRule puts new mail from a sender (or a whole domain) into a folder.
 export interface SortRule {
     id: string;

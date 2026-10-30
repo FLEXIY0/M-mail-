@@ -56,12 +56,6 @@ type configuration struct {
 	// service of Mail.ru (pointer: unset means on).
 	SenderPhotos  *bool
 	EncryptionKey string
-
-	// UpdateSource is "owner/repo" on GitHub (or a release API URL).
-	UpdateSource string
-	// NotifyAdminsAboutUpdates is a pointer so that "never saved" means
-	// the default (on), not false.
-	NotifyAdminsAboutUpdates *bool
 }
 
 // browserModeAllowed tells whether the user may make the icon open the
@@ -91,10 +85,6 @@ func (c *configuration) collaboraURL() string {
 
 func (c *configuration) requireSignature() bool {
 	return c.RequireSignature == nil || *c.RequireSignature
-}
-
-func (c *configuration) notifyAdminsAboutUpdates() bool {
-	return c.NotifyAdminsAboutUpdates == nil || *c.NotifyAdminsAboutUpdates
 }
 
 // Clone shallow copies the configuration.

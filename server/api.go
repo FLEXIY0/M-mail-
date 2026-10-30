@@ -37,7 +37,6 @@ func (p *Plugin) initRouter() *mux.Router {
 	api.HandleFunc("/disconnect", p.handleDisconnect).Methods(http.MethodPost)
 	api.HandleFunc("/sync", p.handleSync).Methods(http.MethodPost)
 	api.HandleFunc("/preferences", p.handlePreferences).Methods(http.MethodPut)
-	api.HandleFunc("/admin/update", p.handleUpdateInfo).Methods(http.MethodGet)
 
 	api.HandleFunc("/folders", p.handleFolders).Methods(http.MethodGet)
 	api.HandleFunc("/messages", p.handleMessages).Methods(http.MethodGet)

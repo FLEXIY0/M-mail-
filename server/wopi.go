@@ -386,6 +386,10 @@ func describeNetError(err error) string {
 	return err.Error()
 }
 
+func (p *Plugin) isSystemAdmin(userID string) bool {
+	return p.API.HasPermissionTo(userID, model.PermissionManageSystem)
+}
+
 // GET /admin/collabora/check — what works and what to ask the
 // administrator of Collabora.
 func (p *Plugin) handleCollaboraCheck(w http.ResponseWriter, r *http.Request) {

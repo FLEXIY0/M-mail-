@@ -8,7 +8,6 @@ import manifest from 'manifest';
 import CollaboraCheck from './components/CollaboraCheck';
 import {MailIcon} from './components/icons';
 import Panel, {PanelTitle} from './components/Panel';
-import UpdatePanel from './components/UpdatePanel';
 import {
     getState, loadAll, mailChanged, openCompose, openInBrowser, openMessage, openWizard,
     refreshMe, setHidePanel, setReduxStore, setShowPanel, setState, subscribe,
@@ -116,7 +115,6 @@ export default class Plugin {
         setHidePanel(() => store.dispatch(rhs.hideRHSPlugin as any));
 
         if (typeof registry.registerAdminConsoleCustomSetting === 'function') {
-            registry.registerAdminConsoleCustomSetting('UpdatePanel', UpdatePanel, {showTitle: true});
             registry.registerAdminConsoleCustomSetting('CollaboraCheck', CollaboraCheck, {showTitle: true});
         }
 

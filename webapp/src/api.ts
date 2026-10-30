@@ -3,7 +3,7 @@ import manifest from 'manifest';
 import type {
     CheckResult, Endpoint, Folder, IconAction, IconInfo, MattermostUser, Me, Message,
     AttachmentRef, AttachmentView, CollaboraCheck, Contact, MessagePage, OfficeSession, PluginConfig, SendRequest, Settings, SortRule,
-    SortRuleInput, UpdateInfo,
+    SortRuleInput,
 } from './types';
 
 export class ApiError extends Error {
@@ -121,7 +121,6 @@ export const api = {
     savePreferences: (iconAction: IconAction, webUrl: string) =>
         request<IconInfo>('PUT', '/preferences', {icon_action: iconAction, web_url: webUrl}),
     sync: () => request<Me>('POST', '/sync'),
-    updateInfo: (refresh: boolean) => request<UpdateInfo>('GET', `/admin/update${refresh ? '?refresh=1' : ''}`),
 
     folders: () => request<{folders: Folder[]}>('GET', '/folders'),
     messages: (folder: string, offset: number, query = '', filter = '') =>
