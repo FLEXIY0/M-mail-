@@ -1,5 +1,5 @@
 {
-    "id": "com.github.flexiy0.mail",
+    "id": "mail",
     "name": "Почта (VK WorkSpace, Mail.ru, Яндекс, IMAP)",
     "description": "Почта на правой панели Mattermost: входящие, чтение, ответ и пересылка, новые письма с уведомлениями от бота. Подключается через мастер по шагам по IMAP/SMTP.",
     "icon_path": "assets/icon.svg",

@@ -2610,13 +2610,13 @@ $flag: #ff5c5c;
 // Unread counter on the App Bar icon ------------------------------------------
 // Set by updateIconBadge in index.tsx. :has() keeps the rule to our icon.
 
-.mml-has-unread .app-bar__icon-inner:has(> img[alt='com.github.flexiy0.mail']),
-.mml-has-unread .app-bar__icon:has(img[alt='com.github.flexiy0.mail']) {
+.mml-has-unread .app-bar__icon-inner:has(> img[alt='mail']),
+.mml-has-unread .app-bar__icon:has(img[alt='mail']) {
     position: relative;
     overflow: visible;
 }
 
-.mml-has-unread .app-bar__icon-inner:has(> img[alt='com.github.flexiy0.mail'])::after {
+.mml-has-unread .app-bar__icon-inner:has(> img[alt='mail'])::after {
     content: var(--mml-unread, '');
     position: absolute;
     top: -5px;

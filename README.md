@@ -159,7 +159,7 @@
 Требования: Mattermost **9.0+** (проверено на 11.7.2), исходящие соединения с
 сервера Mattermost до почтовых серверов (порты 993 и 465 или 587).
 
-1. Скачайте `com.github.flexiy0.mail-<версия>-linux-amd64.tar.gz` из
+1. Скачайте `mail-<версия>-linux-amd64.tar.gz` из
    [Releases](https://github.com/FLEXIY0/M-mail-/releases) или соберите сами (см. ниже).
 2. **Системная консоль → Плагины → Управление плагинами → Загрузить плагин**.
    Если загрузка выключена, включите `PluginSettings.EnableUploads`.
@@ -301,7 +301,7 @@ docker compose exec mattermost mmctl --local team users add dev admin
 ```bash
 make            # проверки, тесты и сборка
 make test       # тесты сервера и webapp
-make dist       # собрать dist/com.github.flexiy0.mail-<версия>.tar.gz
+make dist       # собрать dist/mail-<версия>.tar.gz
 GREENMAIL_HOST=localhost go test ./server/mailclient/   # + тест на живом GreenMail
 ```
 

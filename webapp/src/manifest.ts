@@ -2,11 +2,11 @@
 
 const manifest = JSON.parse(`
 {
-    "id": "com.github.flexiy0.mail",
+    "id": "mail",
     "name": "Почта (VK WorkSpace, Mail.ru, Яндекс, IMAP)",
     "description": "Почта на правой панели Mattermost: входящие, чтение, ответ и пересылка, новые письма с уведомлениями от бота. Подключается через мастер по шагам по IMAP/SMTP.",
     "icon_path": "assets/icon.svg",
-    "version": "0.0.0+5fb2b50",
+    "version": "0.0.0+e9db295",
     "min_server_version": "9.0.0",
     "server": {
         "executables": {
